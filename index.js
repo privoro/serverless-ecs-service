@@ -7,6 +7,8 @@ const DockerOptions = dockerCLI.Options;
 const Docker = dockerCLI.Docker;
 const Promise = require('bluebird');
 const { execSync } = require('child_process');
+const _ = require('lodash');
+const resources = require('./resources');
 
 const pre = 'ecs-service';
 
@@ -225,16 +227,36 @@ class ServerlessPlugin {
     });
   }
 
+  addResource(resource) {
+    _.merge(this.serverless.service.provider.compiledCloudFormationTemplate.Resources, resource);
+  }
+
   addCustomResources() {
+    let config = this.getConfig();
+    if (config === null) {
+      this.serverless.cli.log(`serverless-ecs-service config not provided.`);
+      return;
+    }
+
     // TODO
     // add cloudformation resources to describe ECS service
     // ECSTaskExecutionRole
     // add ECR Repository for images
     // add Service definition
-      // load balance target group
+    // load balance target group
     // add task definition
     // add api gateway http integration -> forward to load balanced service
     // cloud watch log group
+    this.serverless.cli.log(`Add custom resources ...`);
+    return Promise.each(config.services, service => {
+      // RestAPI
+      this.addResource(resources.ApiGatewayRestApi(service.name, 'PRIVATE'));
+
+
+    }).then(() => {
+      console.log(this.serverless.service.provider.compiledCloudFormationTemplate.Resources);
+    });
+
   }
 
   rollbackService() {
