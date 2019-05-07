@@ -8,7 +8,7 @@ const Docker = dockerCLI.Docker;
 const Promise = require('bluebird');
 const { execSync } = require('child_process');
 const _ = require('lodash');
-const resources = require('./resources');
+const Resources = require('./resources');
 
 const pre = 'ecs-service';
 
@@ -40,6 +40,13 @@ class ServerlessPlugin {
         lifecycleEvents: [
           'delete'
         ]
+      },
+
+      'ecs-run-local': {
+        usage: 'Runs ECS server locally',
+        lifecycleEvents: [
+          'run-local'
+        ],
       }
     };
 
@@ -89,29 +96,25 @@ class ServerlessPlugin {
     return tag;
   }
 
-  getRepoUrl(service) {
+  getRepoUrl(container) {
     let config = this.getConfig();
-    let name = this.getRepositoryName(service);
+    let name = this.getRepositoryName(container);
     let tag = this.getTag();
 
     return `${config.ecr['aws-account-id']}.dkr.ecr.${this.options.region}.amazonaws.com/${name}:${tag}`;
-    //docker tag neo4j-dev:latest 492058901556.dkr.ecr.us-west-2.amazonaws.com/neo4j-dev:latest
-
-    //Run the following command to push this image to your newly created AWS repository:
-     // docker push 492058901556.dkr.ecr.us-west-2.amazonaws.com/neo4j-dev:latest
   }
 
-  getRepositoryName(service) {
+  getRepositoryName(container) {
     let config = this.getConfig();
-    let parts = [service.name];
+    let parts = [container.name];
     if(config.ecr.namespace) {
       parts.unshift(config.ecr.namespace);
     }
     return parts.join('/');
   }
 
-  getDockerPath(service) {
-    return path.resolve(this.serverless.config.servicePath, service['docker-dir'] || './')
+  getDockerPath(container) {
+    return path.resolve(this.serverless.config.servicePath, container['docker-dir'] || './')
   }
 
   setupEcr() {
@@ -129,8 +132,8 @@ class ServerlessPlugin {
 
     let ecr = this.getECR();
 
-    return Promise.each(config.services, service => {
-      let repoName = this.getRepositoryName(service);
+    return Promise.each(config.containers, container => {
+      let repoName = this.getRepositoryName(container);
 
       let params = {
         registryId: config.ecr.registry,
@@ -170,11 +173,11 @@ class ServerlessPlugin {
 
     let tag = this.getTag();
 
-    return Promise.each(config.services, (service => {
-      let dockerPath = this.getDockerPath(service);
+    return Promise.each(config.containers, (container => {
+      let dockerPath = this.getDockerPath(container);
       let docker = this.getDocker(dockerPath);
-      let name = this.getRepositoryName(service);
-      let repoUrl = this.getRepoUrl(service);
+      let name = this.getRepositoryName(container);
+      let repoUrl = this.getRepoUrl(container);
 
       this.serverless.cli.log(`Building image ${name} ...`);
       return docker.command(`build -t ${name}:${tag} .`)
@@ -213,9 +216,9 @@ class ServerlessPlugin {
       this.serverless.cli.log(`Failed to configure docker with ECR credentials: ${err.message}`);
     }
 
-    return Promise.each(config.services, service => {
-      let repoUrl = this.getRepoUrl(service);
-      let dockerPath = this.getDockerPath(service);
+    return Promise.each(config.containers, container => {
+      let repoUrl = this.getRepoUrl(container);
+      let dockerPath = this.getDockerPath(container);
       let docker = this.getDocker(dockerPath);
       return docker.command(`push ${repoUrl}`)
         .then(() => {
@@ -238,6 +241,7 @@ class ServerlessPlugin {
       return;
     }
 
+    let tag = this.getTag();
     // TODO
     // add cloudformation resources to describe ECS service
     // ECSTaskExecutionRole
@@ -248,9 +252,19 @@ class ServerlessPlugin {
     // add api gateway http integration -> forward to load balanced service
     // cloud watch log group
     this.serverless.cli.log(`Add custom resources ...`);
-    return Promise.each(config.services, service => {
+
+    let resources = Resources(this.serverless.service, config, this.options);
+    // shared resources
+    this.addResource(resources.LogGroup());
+    this.addResource(resources.EcsTaskExecutionRole());
+    this.addResource(resources.EcsTaskDefinition(config.containers,tag));
+    this.addResource(resources.EcsService());
+
+    // service specific resources
+    return Promise.each(config.containers, container => {
+
       // RestAPI
-      this.addResource(resources.ApiGatewayRestApi(service.name, 'PRIVATE'));
+      //this.addResource(resources.ApiGatewayRestApi(service.name, 'EDGE'));
 
 
     }).then(() => {
@@ -274,8 +288,8 @@ class ServerlessPlugin {
     }
 
     let ecr = this.getECR();
-    return Promise.each(config.services, service => {
-      let repositoryName = this.getRepositoryName(service);
+    return Promise.each(config.containers, container => {
+      let repositoryName = this.getRepositoryName(container);
       let params = {
         force: true,
         repositoryName
