@@ -10,9 +10,10 @@ module.exports = (serverlessService, config, options) => {
       }
     }),
 
-    EcsService: () => ({
+    EcsService: (containers, tag) => ({
       'ECSService': {
         Type: 'AWS::ECS::Service',
+        DependsOn: containers.map(container => `${container.name}TargetGroup`),
         Properties: {
           Cluster: config.cluster,
           LaunchType: 'FARGATE',
@@ -30,8 +31,13 @@ module.exports = (serverlessService, config, options) => {
             }
           },
           SchedulingStrategy: 'REPLICA',
-          ServiceName: `${slsServiceName}`,
-          TaskDefinition: { Ref: 'TaskDefinition' }
+          ServiceName: `${slsServiceName}-${tag}`,
+          TaskDefinition: { Ref: 'TaskDefinition' },
+          LoadBalancers: containers.map(container => ({
+            ContainerName: container.name,
+            ContainerPort: container.port,
+            TargetGroupArn: {Ref: `${container.name}TargetGroup`}
+          }))
         }
       },
     }),
@@ -55,8 +61,17 @@ module.exports = (serverlessService, config, options) => {
         Essential: true,
         Image: getRepoUrl(container),
         Name: container.name,
-        Environment: [],
-        PortMappings: (container.ports || []).map(p => ({ContainerPort: p})),
+        Environment: [
+          {
+            Name: 'BASE_PATH',
+            Value: `/${container.path}`.replace('//','/')
+          }
+        ],
+        PortMappings: [
+          {
+            ContainerPort: container.port
+          }
+        ],
         ReadonlyRootFilesystem: true,
         LogConfiguration: {
           LogDriver: 'awslogs',
@@ -129,30 +144,140 @@ module.exports = (serverlessService, config, options) => {
       }
     }),
 
-    ApiGatewayRestApi: (serviceName, endpointType) => ({
+    TargetGroup: (container, protocol) => {
+      return {
+        [`${container.name}TargetGroup`]: {
+          Type: 'AWS::ElasticLoadBalancingV2::TargetGroup',
+          Properties: {
+            HealthCheckIntervalSeconds: 30,
+            HealthCheckPath: container.healthcheck.path,
+            HealthCheckProtocol: container.healthcheck.protocol,
+            HealthCheckPort: container.healthcheck.port,
+            HealthyThresholdCount: 5,
+            UnhealthyThresholdCount: 5,
+            Matcher: {
+              HttpCode: container.healthcheck.codes
+            },
+            Port: 3000,
+            Protocol: protocol,
+            TargetType: 'ip',
+            VpcId: config.vpc.id,
+          },
+        }
+      }
+    },
+
+    ListenerRule: (container, priority) => {
+      let path =container.path.replace(/\/$/, "");
+      path = path.replace(/^\//, "");
+      return {
+        [`${container.name}ListenerRule`]: {
+          Type: "AWS::ElasticLoadBalancingV2::ListenerRule",
+          DependsOn: [
+            `${container.name}TargetGroup`
+          ],
+          Properties: {
+            Actions: [
+              {
+                Type: "forward",
+                TargetGroupArn: {Ref: `${container.name}TargetGroup`}
+              }
+            ],
+            Conditions: [
+              {
+                Field: "path-pattern",
+                Values: [
+                  `/${path}`,
+                  `/${path}/*`
+                ]
+              }
+            ],
+            Priority: priority,
+            ListenerArn: config.alb.listener.arn,
+          }
+        }
+      };
+    },
+
+    ApiGatewayRestApi: () => ({
       /**
        * EDGE: For an edge-optimized API and its custom domain name.
        * REGIONAL: For a regional API and its custom domain name.
        * PRIVATE: For a private API.
        */
-      [`${serviceName}RestAPI`]: {
+      RestAPI: {
         Type: 'AWS::ApiGateway::RestApi',
         Properties: {
-          Description: `API for ${serviceName}`,
-          Name: serviceName,
+          Description: `API for ${slsServiceName}`,
+          Name: slsServiceName,
           EndpointConfiguration: {
-            Types: [endpointType],
+            Types: ['EDGE'],
           }
         },
       }
     }),
 
+
+    ApiGatewayResource: (path, name) => {
+      if(path[0] === '/'){ path = path.substr(1); }
+
+      return {
+        [`${name}PathResource`]: {
+          Type: 'AWS::ApiGateway::Resource',
+          Properties: {
+            ParentId: `!GetAtt RestAPI.RootResourceId`,
+            RestApiId: `!Ref RestAPI`,
+            PathPart: path
+          }
+        }
+      };
+    },
+
+    ApiGatewayProxyResource: (name, useRoot = false) => {
+      let parentId = useRoot ? '!GetAtt RestAPI.RootResourceId'
+        : `!Ref ${name}PathResource`;
+
+      return {
+        [`${name}ProxyResource`]: {
+          Type: 'AWS::ApiGateway::Resource',
+          Properties: {
+            ParentId: parentId,
+            RestApiId: `!Ref RestAPI`,
+            PathPart: `{proxy+}`
+          }
+        }
+      }
+    },
+
+    ApiGatewayRootMethod: (name) => {
+      return {
+        [`${name}RootMethod`]: {
+          Type: 'AWS::ApiGateway::Method',
+          Properties: {
+            HttpMethod: 'ANY',
+            ResourceId: `!Get Att RestAPI.RootResourceId`,
+            AuthorizationType: 'NONE',
+            Integration: {
+              IntegrationHttpMethod: 'ANY',
+              Type: 'HTTP_PROXY',
+              Uri: `!GetAtt `
+            }
+          }
+        }
+      };
+    },
+
+    ApiGatewayPathMethod: () => {
+      return {};
+    },
+
+    ApiGatewayProxyMethod: () => {
+      return {};
+    },
+
     ApiGatewayStage: () => {},
-    ApiGatewayResource: () => {},
     ApiGatewayBasePathMapping: () => {},
-    ApiGatewayMethod: () => {},
-    HttpsTargetGroup: () => {},
-    HttpTargetGroup: () => {},
+
 
   }
 };

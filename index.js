@@ -258,17 +258,22 @@ class ServerlessPlugin {
     this.addResource(resources.LogGroup());
     this.addResource(resources.EcsTaskExecutionRole());
     this.addResource(resources.EcsTaskDefinition(config.containers,tag));
-    this.addResource(resources.EcsService());
+    this.addResource(resources.EcsService(config.containers, tag));
+
+
+    // this.addResource(resources.ApiGatewayRestApi());
+
 
     // service specific resources
-    return Promise.each(config.containers, container => {
-
-      // RestAPI
-      //this.addResource(resources.ApiGatewayRestApi(service.name, 'EDGE'));
-
+    return Promise.each(config.containers, (container, index) => {
+      this.addResource(resources.TargetGroup(container, 'HTTP'));
+      this.addResource(resources.ListenerRule(container, index+1));
 
     }).then(() => {
-      console.log(this.serverless.service.provider.compiledCloudFormationTemplate.Resources);
+      // add a deployment
+
+
+      console.log(JSON.stringify(this.serverless.service.provider.compiledCloudFormationTemplate.Resources));
     });
 
   }
