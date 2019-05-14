@@ -19,12 +19,34 @@ module.exports = (serverlessService, config, options) => {
             Comment: "DNS record for ecs service",
             RecordSets: [
               {
-                Name: `${slsServiceName}.${config.hostedzone.name}`,
+                Name: `${slsServiceName}-lb.${config.hostedzone.name}`,
                 Type: "CNAME",
                 TTL: "60",
-                ResourceRecords: [config.alb.dns]
+                ResourceRecords: [
+                  config.alb.dns
+                ]
               }
             ]
+          }
+        }
+      }
+    },
+
+    Route53AAlias: () => {
+      return {
+        ApiDnsEntry: {
+          Type: "AWS::Route53::RecordSet",
+          DependsOn: [
+            "RestAPI"
+          ],
+          Properties: {
+            HostedZoneName: config.hostedzone.name,
+            Name: `${slsServiceName}.${config.hostedzone.name}`,
+            Type: "A",
+            AliasTarget: {
+              DNSName: { "Fn::GetAtt": ["CustomDomain", "DistributionDomainName"] },
+              HostedZoneId: "Z2FDTNDATAQYW2" // amazon's account cloudfront id
+            }
           }
         }
       }
@@ -219,7 +241,8 @@ module.exports = (serverlessService, config, options) => {
               {
                 Field: "host-header",
                 Values: [
-                  `${slsServiceName}.${config.hostedzone.name}`.replace(/\.$/, "")
+                  `${slsServiceName}.${config.hostedzone.name}`.replace(/\.$/, ""),
+                  `${slsServiceName}-lb.${config.hostedzone.name}`.replace(/\.$/, "")
                 ]
               }
             ],
@@ -239,7 +262,7 @@ module.exports = (serverlessService, config, options) => {
       RestAPI: {
         Type: 'AWS::ApiGateway::RestApi',
         Properties: {
-          Description: `API for ${slsServiceName}`,
+          Description: `API for ${slsServiceName} `,
           Name: slsServiceName,
           EndpointConfiguration: {
             Types: ['EDGE'],
@@ -256,8 +279,8 @@ module.exports = (serverlessService, config, options) => {
         [`${name}PathResource`]: {
           Type: 'AWS::ApiGateway::Resource',
           Properties: {
-            ParentId: `!GetAtt RestAPI.RootResourceId`,
-            RestApiId: `!Ref RestAPI`,
+            ParentId: { "Fn::GetAtt" : [ "RestAPI", "RootResourceId" ] },
+            RestApiId: {Ref: `RestAPI`},
             PathPart: path
           }
         }
@@ -265,15 +288,16 @@ module.exports = (serverlessService, config, options) => {
     },
 
     ApiGatewayProxyResource: (name, useRoot = false) => {
-      let parentId = useRoot ? '!GetAtt RestAPI.RootResourceId'
-        : `!Ref ${name}PathResource`;
+      let parentId = useRoot ?
+        { "Fn::GetAtt" : [ "RestAPI", "RootResourceId" ] }
+        : {Ref: `${name}PathResource`};
 
       return {
         [`${name}ProxyResource`]: {
           Type: 'AWS::ApiGateway::Resource',
           Properties: {
             ParentId: parentId,
-            RestApiId: `!Ref RestAPI`,
+            RestApiId: {Ref: 'RestAPI'},
             PathPart: `{proxy+}`
           }
         }
@@ -286,28 +310,114 @@ module.exports = (serverlessService, config, options) => {
           Type: 'AWS::ApiGateway::Method',
           Properties: {
             HttpMethod: 'ANY',
-            ResourceId: `!Get Att RestAPI.RootResourceId`,
+            ResourceId: { "Fn::GetAtt" : [ "RestAPI", "RootResourceId" ] },
             AuthorizationType: 'NONE',
             Integration: {
               IntegrationHttpMethod: 'ANY',
               Type: 'HTTP_PROXY',
-              Uri: `!GetAtt `
+              //Uri: `https://${config.alb.dns}`
+              Uri: `https://${slsServiceName}-lb.${config.hostedzone.name}`.replace(/\.$/, "")
+            },
+            RestApiId: {Ref: 'RestAPI'}
+          }
+        }
+      };
+    },
+
+    ApiGatewayPathMethod: (name, path, useRoot) => {
+      return {
+        [`${name}PathMethod`]: {
+          Type: 'AWS::ApiGateway::Method',
+          Properties: {
+            HttpMethod: 'ANY',
+            ResourceId: useRoot ?
+              { "Fn::GetAtt" : [ "RestAPI", "RootResourceId" ] }
+              : {Ref: `${name}PathResource`},
+            AuthorizationType: 'NONE',
+            Integration: {
+              IntegrationHttpMethod: 'ANY',
+              Type: 'HTTP_PROXY',
+              //Uri: `https://${config.alb.dns}`
+              Uri: `https://${slsServiceName}-lb.${config.hostedzone.name}`.replace(/\.$/, "") + `/${path}`,
+            },
+            RestApiId: {Ref: 'RestAPI'}
+          }
+        }
+      };
+    },
+
+    ApiGatewayProxyMethod: (name, path, useRoot = true) => {
+      return {
+        [`${name}ProxyMethod`]: {
+          Type: 'AWS::ApiGateway::Method',
+          Properties: {
+            HttpMethod: 'ANY',
+            AuthorizationType: 'NONE',
+            RequestParameters: {
+              "method.request.path.proxy": true
+            },
+            ResourceId: useRoot ?
+              { "Fn::GetAtt" : [ "RestAPI", "RootResourceId" ] }
+              : {Ref: `${name}ProxyResource`},
+            RestApiId: {Ref: 'RestAPI'},
+            Integration: {
+              IntegrationHttpMethod: 'ANY',
+              Type: 'HTTP_PROXY',
+              //Uri: `https://${config.alb.dns}`,
+              Uri: `https://${slsServiceName}-lb.${config.hostedzone.name}`.replace(/\.$/, "") + `/${path}/{proxy}`,
+              CacheKeyParameters: [
+                'method.request.path.proxy'
+              ],
+              RequestParameters: {
+                "integration.request.path.proxy": 'method.request.path.proxy'
+              },
+              PassthroughBehavior: "WHEN_NO_MATCH"
             }
           }
         }
       };
     },
 
-    ApiGatewayPathMethod: () => {
-      return {};
+    ApiGatewayStage: (containers, methods) => {
+      return {
+        [`Stage${new Date().getTime()}`]: {
+          Type: "AWS::ApiGateway::Deployment",
+          DependsOn: methods,
+          Properties: {
+            Description: `${slsServiceName} stage ${options.stage}`,
+            RestApiId: {Ref: 'RestAPI'},
+            StageName: `${options.stage}`
+          }
+        }
+      }
     },
 
-    ApiGatewayProxyMethod: () => {
-      return {};
+    ApiGatewayCustomDomain: () => {
+      return {
+        CustomDomain: {
+          Type: "AWS::ApiGateway::DomainName",
+          Properties: {
+            CertificateArn: config.hostedzone.CertificateArn,
+            DomainName: `${slsServiceName}.${config.hostedzone.name}`.replace(/\.$/, ""),
+          }
+        }
+      }
     },
 
-    ApiGatewayStage: () => {},
-    ApiGatewayBasePathMapping: () => {},
+    ApiGatewayBasePathMapping: () => {
+      return {
+        BasePathMapping: {
+          Type: "AWS::ApiGateway::BasePathMapping",
+          Properties: {
+//            BasePath: "", // cant be empty string
+            DomainName: {Ref: "CustomDomain"},
+            RestApiId: {Ref: 'RestAPI'},
+            Stage: `${options.stage}`
+          }
+        }
+      }
+    },
+
 
 
   }

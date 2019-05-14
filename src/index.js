@@ -9,8 +9,23 @@ const Promise = require('bluebird');
 const { execSync } = require('child_process');
 const _ = require('lodash');
 const Resources = require('./resources');
+const {ConfigFactory} = require('./config');
 
-const pre = 'ecs-service';
+const catcher = function(cb1, cb2) {
+  return new Promise((resolve, reject) => {
+    let cbs = [].slice.call(arguments);
+
+    try {
+      let results = [];
+      for (let i = 0; i < cbs.length; i++) {
+        results.push(cbs[i]());
+      }
+      resolve(results);
+    } catch (e) {
+      reject(e);
+    }
+  });
+};
 
 class ServerlessPlugin {
   constructor(serverless, options) {
@@ -18,23 +33,6 @@ class ServerlessPlugin {
     this.options = options;
 
     this.commands = {
-      welcome: {
-        usage: 'Helps you start your first Serverless plugin',
-        lifecycleEvents: [
-          'hello',
-          'world',
-        ],
-        options: {
-          message: {
-            usage:
-              'Specify the message you want to deploy '
-              + '(e.g. "--message \'My Message\'" or "-m \'My Message\'")',
-            required: true,
-            shortcut: 'm',
-          },
-        },
-      },
-
       'clean-registry': {
         usage: 'Removes the ECR repository (and all of its images) created by the plugin for this service',
         lifecycleEvents: [
@@ -51,11 +49,6 @@ class ServerlessPlugin {
     };
 
     this.hooks = {
-      'before:welcome:hello': this.beforeWelcome.bind(this),
-      'welcome:hello': this.welcomeUser.bind(this),
-      'welcome:world': this.displayHelloMessage.bind(this),
-      'after:welcome:world': this.afterHelloWorld.bind(this),
-
       'clean-registry:delete': this.removeRepositories.bind(this),
 
       'before:package:createDeploymentArtifacts': this.setupEcr.bind(this),
@@ -68,7 +61,7 @@ class ServerlessPlugin {
   }
 
   getConfig() {
-    return this.serverless.service.custom['serverless-ecs-service'] || null;
+    return ConfigFactory(this.serverless.service.custom['serverless-ecs-service']);
   }
 
   getDocker(cwd) {
@@ -79,7 +72,9 @@ class ServerlessPlugin {
   }
 
   getAws() {
-    if(! this.serverless.providers.aws) { return null; }
+    if(! this.serverless.providers.aws) {
+      throw new Error('serverless-ecs-service only works with the aws provider');
+    }
     return this.serverless.providers.aws.sdk || null;
   }
 
@@ -118,49 +113,47 @@ class ServerlessPlugin {
   }
 
   setupEcr() {
-    let config = this.getConfig();
-    if(config === null) {
-      this.serverless.cli.log(`serverless-ecs-service config not provided. Skipping build image`);
-      return;
-    }
+    return catcher(this.getConfig, this.getAws)
+      .then(results=> {
+        let [config, aws] = results;
 
-    let aws = this.getAws();
-    if(aws === null) {
-      this.serverless.cli.log(`serverless-ecs-service only works with the aws provider`);
-      return;
-    }
+        let ecr = this.getECR();
 
-    let ecr = this.getECR();
+        return Promise.each(config.containers, container => {
+          let repoName = this.getRepositoryName(container);
 
-    return Promise.each(config.containers, container => {
-      let repoName = this.getRepositoryName(container);
-
-      let params = {
-        registryId: config.ecr.registry,
-        repositoryNames: [
-          repoName
-        ]
-      };
-
-      return ecr.describeRepositories(params).promise()
-        .then(data => {
-          this.serverless.cli.log(`√ Repository ${repoName} already exists ...`)
-        }).catch(err => {
-          if(err.statusCode !== 400) {
-            throw err;
-          }
-          // repo not found, create it
-          let createParams = {
-            repositoryName: repoName
+          let params = {
+            registryId: config.ecr.registry,
+            repositoryNames: [
+              repoName
+            ]
           };
 
-          return ecr.createRepository(createParams).promise()
+          return ecr.describeRepositories(params).promise()
             .then(data => {
-              this.serverless.cli.log(`√ Created Repository ${data.repository.repositoryName} : ${data.repository.repositoryArn} ...`);
-              return;
+              this.serverless.cli.log(`√ Repository ${repoName} already exists ...`)
+            }).catch(err => {
+              if(err.statusCode !== 400) {
+                throw err;
+              }
+              // repo not found, create it
+              let createParams = {
+                repositoryName: repoName
+              };
+
+              return ecr.createRepository(createParams).promise()
+                .then(data => {
+                  this.serverless.cli.log(`√ Created Repository ${data.repository.repositoryName} : ${data.repository.repositoryArn} ...`);
+                  return;
+                });
             });
         });
-    });
+      })
+      .catch(e =>
+        this.serverless.cli.log(
+          `Skipping build image: ${e.message}`));
+
+
 
   }
 
@@ -253,37 +246,49 @@ class ServerlessPlugin {
     }
 
     let tag = this.getTag();
-    // TODO
-    // add cloudformation resources to describe ECS service
-    // ECSTaskExecutionRole
-    // add ECR Repository for images
-    // add Service definition
-    // load balance target group
-    // add task definition
-    // add api gateway http integration -> forward to load balanced service
-    // cloud watch log group
     this.serverless.cli.log(`Add custom resources ...`);
 
     let resources = Resources(this.serverless.service, config, this.options);
     // shared resources
     this.addResource(resources.LogGroup());
     this.addResource(resources.Route53CName());
+    this.addResource(resources.Route53AAlias());
     this.addResource(resources.EcsTaskExecutionRole());
     this.addResource(resources.EcsTaskDefinition(config.containers,tag));
     this.addResource(resources.EcsService(config.containers, tag));
 
 
-    // this.addResource(resources.ApiGatewayRestApi());
-
+    this.addResource(resources.ApiGatewayRestApi());
+    this.addResource(resources.ApiGatewayCustomDomain());
+    this.addResource(resources.ApiGatewayBasePathMapping());
 
     // service specific resources
     return Promise.each(config.containers, (container, index) => {
       this.addResource(resources.TargetGroup(container, 'HTTP'));
       this.addResource(resources.ListenerRule(container, index+1));
 
-    }).then(() => {
-      // add a deployment
+      // api gateway
+      let path = container.path;
+      this.addResource(resources.ApiGatewayResource(path, container.name));
+      this.addResource(resources.ApiGatewayPathMethod(container.name, path, false));
+      this.addResource(resources.ApiGatewayProxyResource(container.name, false));
+      this.addResource(resources.ApiGatewayProxyMethod(container.name, path, false));
+      //this.addResource(resources.ApiGatewayRootMethod( container.name))
+      // if(path !== "/") {
+      //   this.addResource(resources.ApiGatewayResource(path, container.name));
+      //   this.addResource(resources.ApiGatewayPathMethod(container.name, true));
+      // }
 
+      // root resource exists by default, just need method
+      //this.addResource(resources.ApiGatewayRootMethod(container.name));
+      // let useRoot = false; // path === "/"
+      // this.addResource(resources.ApiGatewayProxyResource(container.name, useRoot));
+      // this.addResource(resources.ApiGatewayProxyMethod(container.name, useRoot));
+
+    }).then(() => {
+      let apiMethods = Object.keys(this.serverless.service.provider.compiledCloudFormationTemplate.Resources).filter((a)=> a.indexOf('RootMethod') !== -1 || a.indexOf('PathMethod') !== -1 || a.indexOf('ProxyMethod') !== -1);
+      // add a deployment
+      this.addResource(resources.ApiGatewayStage(config.containers, apiMethods));
 
       console.log(JSON.stringify(this.serverless.service.provider.compiledCloudFormationTemplate.Resources));
     });
@@ -319,21 +324,6 @@ class ServerlessPlugin {
 
   }
 
-  beforeWelcome() {
-    this.serverless.cli.log('Hello from Serverless!');
-  }
-
-  welcomeUser() {
-    this.serverless.cli.log('Your message:');
-  }
-
-  displayHelloMessage() {
-    this.serverless.cli.log(`${this.options.message}`);
-  }
-
-  afterHelloWorld() {
-    this.serverless.cli.log('Please come again!');
-  }
 }
 
 module.exports = ServerlessPlugin;
