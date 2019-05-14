@@ -234,6 +234,17 @@ class ServerlessPlugin {
     _.merge(this.serverless.service.provider.compiledCloudFormationTemplate.Resources, resource);
   }
 
+  addOutput(output) {
+    _.merge(this.serverless.service.provider.compiledCloudFormationTemplate.Outputs, output);
+    /*
+      Outputs:
+    NewServiceExport:
+      Value: 'A Value To Export'
+      Export:
+        Name: ${self:custom.exportName}
+     */
+  }
+
   addCustomResources() {
     let config = this.getConfig();
     if (config === null) {
@@ -256,6 +267,7 @@ class ServerlessPlugin {
     let resources = Resources(this.serverless.service, config, this.options);
     // shared resources
     this.addResource(resources.LogGroup());
+    this.addResource(resources.Route53CName());
     this.addResource(resources.EcsTaskExecutionRole());
     this.addResource(resources.EcsTaskDefinition(config.containers,tag));
     this.addResource(resources.EcsService(config.containers, tag));

@@ -10,6 +10,26 @@ module.exports = (serverlessService, config, options) => {
       }
     }),
 
+    Route53CName: () => {
+      return {
+        CName: {
+          Type: "AWS::Route53::RecordSetGroup",
+          Properties: {
+            HostedZoneName: config.hostedzone.name,
+            Comment: "DNS record for ecs service",
+            RecordSets: [
+              {
+                Name: `${slsServiceName}.${config.hostedzone.name}`,
+                Type: "CNAME",
+                TTL: "60",
+                ResourceRecords: [config.alb.dns]
+              }
+            ]
+          }
+        }
+      }
+    },
+
     EcsService: (containers, tag) => ({
       'ECSService': {
         Type: 'AWS::ECS::Service',
@@ -187,8 +207,14 @@ module.exports = (serverlessService, config, options) => {
               {
                 Field: "path-pattern",
                 Values: [
-                  `/${path}`,
-                  `/${path}/*`
+                  `/${path}`.replace('//','/'),
+                  `/${path}/*`.replace('//','/')
+                ]
+              },
+              {
+                Field: "host-header",
+                Values: [
+                  `${slsServiceName}.${config.hostedzone.name}`.replace(/\.$/, "")
                 ]
               }
             ],
