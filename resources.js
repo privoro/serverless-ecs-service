@@ -75,33 +75,38 @@ module.exports = (serverlessService, config, options) => {
         let name = getImageName(container);
 
         return `${config.ecr['aws-account-id']}.dkr.ecr.${options.region}.amazonaws.com/${name}`;
-      }
+      };
 
-      let containerDefinitions = containers.map(container => ({
-        Essential: true,
-        Image: getRepoUrl(container),
-        Name: container.name,
-        Environment: [
-          {
-            Name: 'BASE_PATH',
-            Value: `/${container.path}`.replace('//','/')
-          }
-        ],
-        PortMappings: [
-          {
-            ContainerPort: container.port
-          }
-        ],
-        ReadonlyRootFilesystem: true,
-        LogConfiguration: {
-          LogDriver: 'awslogs',
-          Options: {
-            'awslogs-group': `${slsServiceName}-ecs-service`,
-            'awslogs-region': options.region,
-            'awslogs-stream-prefix': container.name,
+      let containerDefinitions = containers.map(container => {
+        let env = Object.keys(serverlessService.provider.environment).map(key => ({
+          Name: key,
+          Value: serverlessService.provider.environment[key]
+        }));
+        env.push({
+          Name: 'BASE_PATH',
+          Value: `/${container.path}`.replace('//','/')
+        });
+        return {
+          Essential: true,
+          Image: getRepoUrl(container),
+          Name: container.name,
+          Environment: env,
+          PortMappings: [
+            {
+              ContainerPort: container.port
+            }
+          ],
+          ReadonlyRootFilesystem: true,
+          LogConfiguration: {
+            LogDriver: 'awslogs',
+            Options: {
+              'awslogs-group': `${slsServiceName}-ecs-service`,
+              'awslogs-region': options.region,
+              'awslogs-stream-prefix': container.name,
+            }
           }
         }
-      }));
+      });
 
       return {
         [`TaskDefinition`]: {
