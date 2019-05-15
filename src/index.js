@@ -10,22 +10,8 @@ const { execSync } = require('child_process');
 const _ = require('lodash');
 const Resources = require('./resources');
 const {ConfigFactory} = require('./config');
+const {tryAll} = require('./lib/tryAll');
 
-const catcher = function(cb1, cb2) {
-  return new Promise((resolve, reject) => {
-    let cbs = [].slice.call(arguments);
-
-    try {
-      let results = [];
-      for (let i = 0; i < cbs.length; i++) {
-        results.push(cbs[i]());
-      }
-      resolve(results);
-    } catch (e) {
-      reject(e);
-    }
-  });
-};
 
 class ServerlessPlugin {
   constructor(serverless, options) {
@@ -55,7 +41,6 @@ class ServerlessPlugin {
       'package:createDeploymentArtifacts': this.buildImage.bind(this),
       'after:package:createDeploymentArtifacts': this.pushImageToEcr.bind(this),
       'before:package:finalize': this.addCustomResources.bind(this),
-      'rollback:rollback': this.rollbackService.bind(this),
       'remove:remove': this.removeService.bind(this)
     };
   }
@@ -113,7 +98,7 @@ class ServerlessPlugin {
   }
 
   setupEcr() {
-    return catcher(this.getConfig, this.getAws)
+    return tryAll(this.getConfig, this.getAws)
       .then(results=> {
         let [config, aws] = results;
 
@@ -273,32 +258,16 @@ class ServerlessPlugin {
       this.addResource(resources.ApiGatewayPathMethod(container.name, path, false));
       this.addResource(resources.ApiGatewayProxyResource(container.name, false));
       this.addResource(resources.ApiGatewayProxyMethod(container.name, path, false));
-      //this.addResource(resources.ApiGatewayRootMethod( container.name))
-      // if(path !== "/") {
-      //   this.addResource(resources.ApiGatewayResource(path, container.name));
-      //   this.addResource(resources.ApiGatewayPathMethod(container.name, true));
-      // }
-
-      // root resource exists by default, just need method
-      //this.addResource(resources.ApiGatewayRootMethod(container.name));
-      // let useRoot = false; // path === "/"
-      // this.addResource(resources.ApiGatewayProxyResource(container.name, useRoot));
-      // this.addResource(resources.ApiGatewayProxyMethod(container.name, useRoot));
-
     }).then(() => {
       let apiMethods = Object.keys(this.serverless.service.provider.compiledCloudFormationTemplate.Resources).filter((a)=> a.indexOf('RootMethod') !== -1 || a.indexOf('PathMethod') !== -1 || a.indexOf('ProxyMethod') !== -1);
       // add a deployment
       this.addResource(resources.ApiGatewayStage(config.containers, apiMethods));
-
-      console.log(JSON.stringify(this.serverless.service.provider.compiledCloudFormationTemplate.Resources));
+      // TODO debug created resources
+      // this.serverless.service.provider.compiledCloudFormationTemplate.Resources
     });
 
   }
 
-  rollbackService() {
-    // perhaps this is not necessary
-    // if we're using the cf resource to define the container + img
-  }
 
   removeService(){}
 
