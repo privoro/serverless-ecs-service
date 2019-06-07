@@ -98,7 +98,7 @@ class ServerlessPlugin {
   }
 
   setupEcr() {
-    return tryAll(this.getConfig, this.getAws)
+    return tryAll(() => this.getConfig(), () => this.getAws())
       .then(results=> {
         let [config, aws] = results;
 
@@ -136,10 +136,7 @@ class ServerlessPlugin {
       })
       .catch(e =>
         this.serverless.cli.log(
-          `Skipping build image: ${e.message}`));
-
-
-
+          `Skipping setup ecr: ${e.message}`));
   }
 
   buildImage() {
@@ -156,6 +153,8 @@ class ServerlessPlugin {
       let docker = this.getDocker(dockerPath);
       let name = this.getRepositoryName(container);
       let repoUrl = this.getRepoUrl(container);
+
+      console.log('container secrets', container.secrets);
 
       this.serverless.cli.log(`Building image ${name} ...`);
       return docker.command(`build -t ${name}:${tag} .`)
@@ -238,7 +237,7 @@ class ServerlessPlugin {
     this.addResource(resources.LogGroup());
     this.addResource(resources.Route53CName());
     this.addResource(resources.Route53AAlias());
-    this.addResource(resources.EcsTaskExecutionRole());
+    this.addResource(resources.EcsTaskExecutionRole(config.containers));
     this.addResource(resources.EcsTaskDefinition(config.containers,tag));
     this.addResource(resources.EcsService(config.containers, tag));
 

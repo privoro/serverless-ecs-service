@@ -1,5 +1,37 @@
 module.exports = (serverlessService, config, options) => {
   let slsServiceName = serverlessService.service;
+
+  function secretArn(secret) {
+    switch(secret.type)  {
+      case 'ssm':
+        return `arn:aws:ssm:${options.region}:${config.ecr['aws-account-id']}:parameter/${secret.id}`;
+      case 'kms':
+        return `arn:aws:kms:${options.region}:${config.ecr['aws-account-id']}:key/${secret.id}`;
+      case 'secretsmanager':
+        return `arn:aws:secretsmanager:${options.region}:${config.ecr['aws-account-id']}:secret:${secret.id}`;
+      default:
+        console.error(`${secret.type} is not a supported type for secret ${secret.name}`);
+        return null;
+    }
+  }
+
+  let SecretsPolicyStatement = (containers) => {
+    return {
+      "Effect": "Allow",
+      "Action": [
+        "ssm:GetParameters",
+        "secretsmanager:GetSecretValue",
+        "kms:Decrypt"
+      ],
+      "Resource":
+        flattenDeep(containers.map(container => container.secrets.map(secret => secretArn(secret) + '*')))
+    }
+  };
+
+  function flattenDeep(arr1) {
+    return arr1.reduce((acc, val) => Array.isArray(val) ? acc.concat(flattenDeep(val)) : acc.concat(val), []);
+  }
+
   return {
     LogGroup: () => ({
       'LogGroup': {
@@ -108,11 +140,17 @@ module.exports = (serverlessService, config, options) => {
           Name: 'BASE_PATH',
           Value: `/${container.path}`.replace('//','/')
         });
+        let secrets = container.secrets.map(secret => ({
+            Name: secret.name,
+            ValueFrom: secretArn(secret)
+          }));
+
         return {
           Essential: true,
           Image: getRepoUrl(container),
           Name: container.name,
           Environment: env,
+          Secrets: secrets,
           PortMappings: [
             {
               ContainerPort: container.port
@@ -146,7 +184,7 @@ module.exports = (serverlessService, config, options) => {
       }
     },
 
-    EcsTaskExecutionRole: () => ({
+    EcsTaskExecutionRole: (containers) => ({
       'ECSTaskExecutionRole': {
         Type: 'AWS::IAM::Role',
         Properties: {
@@ -182,7 +220,8 @@ module.exports = (serverlessService, config, options) => {
                       'logs:PutLogEvents'
                     ],
                     Resource: '*'
-                  }
+                  },
+                  SecretsPolicyStatement(containers)
                 ]
               }
             }
