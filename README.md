@@ -25,6 +25,8 @@ On deployment, the container image for the service is built and pushed to ECR. T
 - ALB: arn:aws:elasticloadbalancing:us-west-2:492058901556:loadbalancer/app/serverless-plugin-test/e3dd81d3e5b6f9bc
 - ECS: serverless-plugin-test
 - ssl cert in us-east-1 for dev/qa.privoro.com
+- secrets manager: oauth client credentials
+- secrets manager: aws credentials
 
 #TODO Env setup
 CloudFormation template that stands up ECS, ALB, Certs for usage in deployment
