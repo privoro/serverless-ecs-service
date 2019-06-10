@@ -1,9 +1,17 @@
 # Serverless ECS Service
-Enables you to deploy docker images to (a preconfigured) ECS Cluster.
+Enables you to deploy docker images to (a preconfigured) ECS Cluster. In addition to functions or resources defined in the serverless configuration file.
+
+For containers specified in the plugin config:
+ * images will be built and pushed to ECR
+ * An ECS Service & TaskDefinition will be created in a pre-configured ECS Cluster
+ * A route to the service will be added to a pre-configured elastic load balancer using the configured basePath name
+ * An internal route53 cname will be created for the service that points to the ELB
+ * An API Gateway Resource with proxy method will be created that proxies HTTP requests to the load balancer (using the route53 domain name) 
+ * A public route53 cname will be created for the service that points to the API Gateway endpoint 
 
 ![Deployment Infrastructure](sls-ecs-plugin-artifacts.png)
 
-The plugin is configured with references to the pre-provisioned resources and with the service (to be deployed to ECS) details.
+The plugin is configured with references to the pre-provisioned resources and with the service's (to be deployed to ECS) details. 
 
 On deployment, the container image for the service is built and pushed to ECR. The service CloudFormation stack will provision APIGateway resources, Route53 record sets, Application Load Balancer rules, ECS Services, and Task Definitions to publish and expose the ECS service via API Gateway.
 
