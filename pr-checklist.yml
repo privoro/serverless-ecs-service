@@ -1,0 +1,7 @@
+checklist:
+  - I verified tests exists for any new or updated endpoints (or there are no endpoint changes)
+  - I verified tests exists for any new or updated graphql queries (or there are no query changes)
+  - I verified unit tests exist for any new or updated domain logic (or there are no domain logic changes)
+  - I verified integration tests exists for any new or updated repository logic (or there are no repository changes)
+  - I understand what the pr is supposed to do (ie, the user story or issue), and how it does it
+  - The scope of the pr does not exceed the user story or issue (Or the story has been updated to reflect new scope)
