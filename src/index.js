@@ -232,27 +232,34 @@ class ServerlessPlugin {
     let tag = this.getTag();
     this.serverless.cli.log(`Add custom resources ...`);
 
+    let hasIngress = (config.containers || []).filter(c => c.path !== null).length > 0;
+
     let resources = Resources(this.serverless.service, config, this.options);
     // shared resources
     this.addResource(resources.LogGroup());
-    this.addResource(resources.Route53CName());
-    this.addResource(resources.Route53AAlias());
+    if(hasIngress) {
+      this.addResource(resources.Route53CName());
+      this.addResource(resources.Route53AAlias());
+    }
     this.addResource(resources.EcsTaskExecutionRole(config.containers));
     this.addResource(resources.EcsTaskDefinition(config.containers,tag));
     this.addResource(resources.EcsService(config.containers, tag));
 
-
-    this.addResource(resources.ApiGatewayRestApi());
-    this.addResource(resources.ApiGatewayCustomDomain());
-    this.addResource(resources.ApiGatewayBasePathMapping());
+    if(hasIngress) {
+      this.addResource(resources.ApiGatewayRestApi());
+      this.addResource(resources.ApiGatewayCustomDomain());
+      this.addResource(resources.ApiGatewayBasePathMapping());
+    }
 
     // service specific resources
     return Promise.each(config.containers, (container, index) => {
+      let path = container.path;
+      if(path === null) { return }
+
       this.addResource(resources.TargetGroup(container, 'HTTP'));
       this.addResource(resources.ListenerRule(container, index+1));
 
-      // api gateway
-      let path = container.path;
+
       this.addResource(resources.ApiGatewayResource(path, container.name));
       this.addResource(resources.ApiGatewayPathMethod(container.name, path, false));
       this.addResource(resources.ApiGatewayProxyResource(container.name, false));

@@ -43,7 +43,7 @@ module.exports = {
         let healthcheck = container.HealthCheck || {};
         return {
           Name: container.Name,
-          Path: container.Path || "/",
+          Path: container.Path || null,
           DockerDir: container.DockerDir || "./",
           Port: container.Port || 80,
           HealthCheck: {
