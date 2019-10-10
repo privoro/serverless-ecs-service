@@ -94,8 +94,9 @@ class ServerlessPlugin {
     return parts.join('/');
   }
 
-  getDockerPath(container) {
-    return path.resolve("../../");
+  getDockerPath() {
+    let config = this.getConfig();
+    return config['contextDir'];
   }
 
   setupEcr() {
@@ -150,11 +151,11 @@ class ServerlessPlugin {
     let tag = this.getTag();
 
     return Promise.each(config.containers, (container => {
-      let dockerPath = this.getDockerPath(container);
+      let dockerPath = this.getDockerPath();
       let docker = this.getDocker(dockerPath);
       let name = this.getRepositoryName(container);
       let repoUrl = this.getRepoUrl(container);
-      let dockerFilepath = path.resolve(this.serverless.config.servicePath, container['docker-dir'] || './');
+      let dockerFilepath = path.resolve(config.contextDir, container['docker-dir'] || this.serverless.config.servicePath);
       console.log('container secrets', container.secrets);
 
       this.serverless.cli.log(`Building image ${name} ...`);
@@ -197,7 +198,7 @@ class ServerlessPlugin {
 
     return Promise.each(config.containers, container => {
       let repoUrl = this.getRepoUrl(container);
-      let dockerPath = this.getDockerPath(container);
+      let dockerPath = this.getDockerPath();
       let docker = this.getDocker(dockerPath);
       return docker.command(`push ${repoUrl}`)
         .then(() => {
