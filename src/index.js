@@ -1,3 +1,4 @@
+
 'use strict';
 // https://gist.github.com/bwinant/406b7cf1677ba63896f5253d07d01f37
 const git = require('git-rev-sync');
@@ -93,8 +94,9 @@ class ServerlessPlugin {
     return parts.join('/');
   }
 
-  getDockerPath(container) {
-    return path.resolve(this.serverless.config.servicePath, container['docker-dir'] || './')
+  getDockerPath() {
+    let config = this.getConfig();
+    return config['contextDir'];
   }
 
   setupEcr() {
@@ -149,15 +151,19 @@ class ServerlessPlugin {
     let tag = this.getTag();
 
     return Promise.each(config.containers, (container => {
-      let dockerPath = this.getDockerPath(container);
+      let dockerPath = this.getDockerPath();
       let docker = this.getDocker(dockerPath);
       let name = this.getRepositoryName(container);
       let repoUrl = this.getRepoUrl(container);
-
+      let dockerFilepath = path.resolve(
+          config.contextDir,
+          container['docker-dir'] || this.serverless.config.servicePath,
+          container['dockerFile'] || 'Dockerfile'
+      );
       console.log('container secrets', container.secrets);
 
       this.serverless.cli.log(`Building image ${name} ...`);
-      return docker.command(`build -t ${name}:${tag} .`)
+      return docker.command(`build --tag ${name}:${tag} --file ${dockerFilepath} .`)
         .then( (result) => {
           for(let i = result.response.length-3; i < result.response.length; i++) {
             if(result.response[i] === '') { continue; }
@@ -195,7 +201,7 @@ class ServerlessPlugin {
 
     return Promise.each(config.containers, container => {
       let repoUrl = this.getRepoUrl(container);
-      let dockerPath = this.getDockerPath(container);
+      let dockerPath = this.getDockerPath();
       let docker = this.getDocker(dockerPath);
       return docker.command(`push ${repoUrl}`)
         .then(() => {
