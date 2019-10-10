@@ -155,7 +155,7 @@ class ServerlessPlugin {
       let docker = this.getDocker(dockerPath);
       let name = this.getRepositoryName(container);
       let repoUrl = this.getRepoUrl(container);
-      let dockerFilepath = path.resolve(config.contextDir, container['docker-dir'] || this.serverless.config.servicePath);
+      let dockerFilepath = path.resolve(config.contextDir, container['docker-dir'] || this.serverless.config.servicePath, '/Dockerfile');
       console.log('container secrets', container.secrets);
 
       this.serverless.cli.log(`Building image ${name} ...`);
