@@ -163,11 +163,7 @@ class ServerlessPlugin {
       console.log('container secrets', container.secrets);
 
       this.serverless.cli.log(`Building image ${name} ...`);
-      let buildCmd = `build --tag ${name}:${tag} --file ${dockerFilepath} .`;
-      let envVars = this.serverless.service.provider.environment || [];
-      let buildVars = [];
-      _.forOwn(envVars, (value, key) => buildVars.push(`--build-arg ${key}=${value}`));
-      return docker.command(buildCmd + buildVars.join(" "))
+      return docker.command(`build --tag ${name}:${tag} --file ${dockerFilepath} .`)
         .then( (result) => {
           for(let i = result.response.length-3; i < result.response.length; i++) {
             if(result.response[i] === '') { continue; }
