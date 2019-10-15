@@ -91,7 +91,7 @@ class ServerlessPlugin {
     if(config.ecr.namespace) {
       parts.unshift(config.ecr.namespace);
     }
-    return parts.join('/');
+    return parts.join('/').toLowerCase();
   }
 
   getDockerPath() {
@@ -156,12 +156,10 @@ class ServerlessPlugin {
       let name = this.getRepositoryName(container);
       let repoUrl = this.getRepoUrl(container);
       let dockerFilepath = path.resolve(
-          config.contextDir,
+          path.resolve(config.contextDir),
           container['docker-dir'] || this.serverless.config.servicePath,
           container['dockerFile'] || 'Dockerfile'
       );
-      console.log('container secrets', container.secrets);
-
       this.serverless.cli.log(`Building image ${name} ...`);
       return docker.command(`build --tag ${name}:${tag} --file ${dockerFilepath} .`)
         .then( (result) => {
@@ -178,7 +176,7 @@ class ServerlessPlugin {
             });
         }).catch(err => {
           this.serverless.cli.log(`Failed to build image.`);
-          this.serverless.cli.log(err);
+          this.serverless.cli.log(err.stdout, err.stderr);
         });
 
     }));
@@ -260,7 +258,7 @@ class ServerlessPlugin {
     // service specific resources
     return Promise.each(config.containers, (container, index) => {
       let path = container.path;
-      if(path === null) { return }
+      if(!path) { return }
 
       this.addResource(resources.TargetGroup(container, 'HTTP'));
       this.addResource(resources.ListenerRule(container, index+1));

@@ -87,7 +87,7 @@ module.exports = (serverlessService, config, options) => {
     EcsService: (containers, tag) => ({
       'ECSService': {
         Type: 'AWS::ECS::Service',
-        DependsOn: containers.map(container => `${container.name}TargetGroup`),
+        DependsOn: (containers || []).filter(container => !!container.path).map(container => `${container.name}TargetGroup`),
         Properties: {
           Cluster: config.cluster,
           LaunchType: 'FARGATE',
@@ -107,7 +107,7 @@ module.exports = (serverlessService, config, options) => {
           SchedulingStrategy: 'REPLICA',
           ServiceName: `${slsServiceName}-${tag}`,
           TaskDefinition: { Ref: 'TaskDefinition' },
-          LoadBalancers: containers.map(container => ({
+          LoadBalancers: containers.filter(container => !! container.path).map(container => ({
             ContainerName: container.name,
             ContainerPort: container.port,
             TargetGroupArn: {Ref: `${container.name}TargetGroup`}
