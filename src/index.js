@@ -236,7 +236,7 @@ class ServerlessPlugin {
     let tag = this.getTag();
     this.serverless.cli.log(`Add custom resources ...`);
 
-    let hasIngress = (config.containers || []).filter(c => c.path !== null).length > 0;
+    let hasIngress = (config.containers || []).filter(c => !!c.path).length > 0;
 
     let resources = Resources(this.serverless.service, config, this.options);
     // shared resources
@@ -271,7 +271,9 @@ class ServerlessPlugin {
     }).then(() => {
       let apiMethods = Object.keys(this.serverless.service.provider.compiledCloudFormationTemplate.Resources).filter((a)=> a.indexOf('RootMethod') !== -1 || a.indexOf('PathMethod') !== -1 || a.indexOf('ProxyMethod') !== -1);
       // add a deployment
-      this.addResource(resources.ApiGatewayStage(config.containers, apiMethods));
+      if(hasIngress){
+        this.addResource(resources.ApiGatewayStage(config.containers, apiMethods));
+      }
       // TODO debug created resources
       // this.serverless.service.provider.compiledCloudFormationTemplate.Resources
     });

@@ -122,7 +122,7 @@ module.exports = (serverlessService, config, options) => {
         if(config.ecr.namespace) {
           parts.unshift(config.ecr.namespace);
         }
-        return parts.join('/') + `:${tag}`;
+        return (parts.join('/') + `:${tag}`).toLowerCase();
       };
 
       let getRepoUrl = (container) => {
@@ -144,14 +144,13 @@ module.exports = (serverlessService, config, options) => {
             Name: secret.name,
             ValueFrom: secretArn(secret)
           }));
-
         return {
           Essential: true,
           Image: getRepoUrl(container),
           Name: container.name,
           Environment: env,
           Secrets: secrets,
-          PortMappings: [
+          PortMappings: !container.port ? [] : [
             {
               ContainerPort: container.port
             }
