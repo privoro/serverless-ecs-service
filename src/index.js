@@ -70,9 +70,16 @@ class ServerlessPlugin {
   }
 
   getTag() {
-    let tag = git.short(this.serverless.config.servicePath);
-    if(git.isDirty()) {
-      tag += '-dirty'
+    let tag;
+    try {
+      tag = git.short(this.serverless.config.servicePath);
+      if(git.isDirty()) {
+        tag += '-dirty'
+      }
+    } catch(err){
+      console.log(`git-rev-sync failed: ${err}`);
+      tag = process.env.CODEBUILD_RESOLVED_SOURCE_VERSION || 'unknown';
+
     }
     return tag;
   }
