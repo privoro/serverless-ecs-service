@@ -86,23 +86,19 @@ class ServerlessPlugin {
 
   getRepoUrl(container) {
     let config = this.getConfig();
-    let name = this.getRepositoryName(container);
+    let name = this.getImageName(container.name);
     let tag = this.getTag();
 
     return `${config.ecr['aws-account-id']}.dkr.ecr.${this.options.region}.amazonaws.com/${name}:${tag}`;
   }
 
-  buildContainerNamespace(name){
+  getImageName(containerName) {
     let config = this.getConfig();
-    let parts = [name];
+    let parts = [containerName];
     if(config.ecr.namespace) {
       parts.unshift(config.ecr.namespace);
     }
     return parts.join('/').toLowerCase();
-  }
-
-  getRepositoryName(container) {
-    return this.buildContainerNamespace(container.name);
   }
 
   getDockerPath() {
@@ -118,7 +114,7 @@ class ServerlessPlugin {
         let ecr = this.getECR();
 
         return Promise.each(config.containers, container => {
-          let repoName = this.getRepositoryName(container);
+          let repoName = this.getImageName(container.name);
 
           let params = {
             registryId: config.ecr.registry,
@@ -181,7 +177,7 @@ class ServerlessPlugin {
     let tag = this.getTag();
     let dockerPath = this.getDockerPath();
     let docker = this.getDocker(dockerPath);
-    let name = this.getRepositoryName(container);
+    let name = this.getImageName(container.name);
     let repoUrl = this.getRepoUrl(container);
     let dockerFilepath = path.resolve(
         path.resolve(config.contextDir),
@@ -189,7 +185,7 @@ class ServerlessPlugin {
         container['dockerFile'] || 'Dockerfile'
     );
     this.serverless.cli.log(`Building image ${name} ...`);
-    return docker.command(`build --tag ${name}:${tag} --file ${dockerFilepath} --no-cache .`)
+    return docker.command(`build --tag ${name}:${tag} --file ${dockerFilepath} .`)
         .then( (result) => {
           for(let i = result.response.length-3; i < result.response.length; i++) {
             if(result.response[i] === '') { continue; }
@@ -218,7 +214,7 @@ class ServerlessPlugin {
       this.serverless.cli.log("option containerName is required to run image");
       return;
     }
-    name = this.buildContainerNamespace(name);
+    name = this.getImageName(name);
     let envVars = this.serverless.service.provider.environment || [];
     let runVars = [];
     _.forOwn(envVars, (value, key) => runVars.push(`-e ${key}="${value}"`));
@@ -335,7 +331,7 @@ class ServerlessPlugin {
 
     let ecr = this.getECR();
     return Promise.each(config.containers, container => {
-      let repositoryName = this.getRepositoryName(container);
+      let repositoryName = this.getImageName(container.name);
       let params = {
         force: true,
         repositoryName
