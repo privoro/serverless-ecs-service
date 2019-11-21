@@ -18,7 +18,6 @@ class ServerlessPlugin {
   constructor(serverless, options) {
     this.serverless = serverless;
     this.options = options;
-
     this.commands = {
       'clean-registry': {
         usage: 'Removes the ECR repository (and all of its images) created by the plugin for this service',
@@ -37,12 +36,13 @@ class ServerlessPlugin {
 
     this.hooks = {
       'clean-registry:delete': this.removeRepositories.bind(this),
-
       'before:package:createDeploymentArtifacts': this.setupEcr.bind(this),
-      'package:createDeploymentArtifacts': this.buildImage.bind(this),
+      'package:createDeploymentArtifacts': this.buildAllImages.bind(this),
       'after:package:createDeploymentArtifacts': this.pushImageToEcr.bind(this),
       'before:package:finalize': this.addCustomResources.bind(this),
-      'remove:remove': this.removeService.bind(this)
+      'remove:remove': this.removeService.bind(this),
+      'before:ecs-run-local:run-local': this.buildImageByName.bind(this),
+      'ecs-run-local:run-local': this.runImage.bind(this)
     };
   }
 
@@ -86,15 +86,15 @@ class ServerlessPlugin {
 
   getRepoUrl(container) {
     let config = this.getConfig();
-    let name = this.getRepositoryName(container);
+    let name = this.getImageName(container.name);
     let tag = this.getTag();
 
     return `${config.ecr['aws-account-id']}.dkr.ecr.${this.options.region}.amazonaws.com/${name}:${tag}`;
   }
 
-  getRepositoryName(container) {
+  getImageName(containerName) {
     let config = this.getConfig();
-    let parts = [container.name];
+    let parts = [containerName];
     if(config.ecr.namespace) {
       parts.unshift(config.ecr.namespace);
     }
@@ -114,7 +114,7 @@ class ServerlessPlugin {
         let ecr = this.getECR();
 
         return Promise.each(config.containers, container => {
-          let repoName = this.getRepositoryName(container);
+          let repoName = this.getImageName(container.name);
 
           let params = {
             registryId: config.ecr.registry,
@@ -148,27 +148,44 @@ class ServerlessPlugin {
           `Skipping setup ecr: ${e.message}`));
   }
 
-  buildImage() {
+  buildAllImages() {
     let config = this.getConfig();
     if(config === null) {
       this.serverless.cli.log(`serverless-ecs-service config not provided. Skipping build image`);
       return;
     }
+    return Promise.each(config.containers, (container => this.buildImage(container)));
+  }
 
+  getContainerByName(name){
+    let config = this.getConfig();
+    return config.containers.find(container => container.name === name);
+  }
+
+  buildImageByName(){
+    let name = this.options.containerName;
+    if(!name){
+      this.serverless.cli.log("option containerName is required to build image");
+      return;
+    }
+    let container = this.getContainerByName(name);
+    return this.buildImage(container);
+  }
+
+  buildImage(container){
+    let config = this.getConfig();
     let tag = this.getTag();
-
-    return Promise.each(config.containers, (container => {
-      let dockerPath = this.getDockerPath();
-      let docker = this.getDocker(dockerPath);
-      let name = this.getRepositoryName(container);
-      let repoUrl = this.getRepoUrl(container);
-      let dockerFilepath = path.resolve(
-          path.resolve(config.contextDir),
-          container['docker-dir'] || this.serverless.config.servicePath,
-          container['dockerFile'] || 'Dockerfile'
-      );
-      this.serverless.cli.log(`Building image ${name} ...`);
-      return docker.command(`build --tag ${name}:${tag} --file ${dockerFilepath} .`)
+    let dockerPath = this.getDockerPath();
+    let docker = this.getDocker(dockerPath);
+    let name = this.getImageName(container.name);
+    let repoUrl = this.getRepoUrl(container);
+    let dockerFilepath = path.resolve(
+        path.resolve(config.contextDir),
+        container['docker-dir'] || this.serverless.config.servicePath,
+        container['dockerFile'] || 'Dockerfile'
+    );
+    this.serverless.cli.log(`Building image ${name} ...`);
+    return docker.command(`build --tag ${name}:${tag} --file ${dockerFilepath} .`)
         .then( (result) => {
           for(let i = result.response.length-3; i < result.response.length; i++) {
             if(result.response[i] === '') { continue; }
@@ -178,15 +195,30 @@ class ServerlessPlugin {
           this.serverless.cli.log(`Built image ${name}.`);
 
           return docker.command(`tag ${name}:${tag} ${repoUrl}`)
-            .then(result => {
-              this.serverless.cli.log(`Tagged image for ECR`);
-            });
+              .then(result => {
+                this.serverless.cli.log(`Tagged image for ECR`);
+              });
         }).catch(err => {
           this.serverless.cli.log(`Failed to build image.`);
           this.serverless.cli.log(err.stdout, err.stderr);
         });
+  }
 
-    }));
+  runImage() {
+    let dockerPath = this.getDockerPath();
+    let docker = this.getDocker(dockerPath);
+    let name = this.options.containerName;
+    let tag = this.getTag();
+
+    if(!name){
+      this.serverless.cli.log("option containerName is required to run image");
+      return;
+    }
+    name = this.getImageName(name);
+    let envVars = this.serverless.service.provider.environment || [];
+    let runVars = [];
+    _.forOwn(envVars, (value, key) => runVars.push(`-e ${key}="${value}"`));
+    return docker.command(`run ` + runVars.join(" ") + ` ${name}:${tag}`);
   }
 
   pushImageToEcr() {
@@ -299,7 +331,7 @@ class ServerlessPlugin {
 
     let ecr = this.getECR();
     return Promise.each(config.containers, container => {
-      let repositoryName = this.getRepositoryName(container);
+      let repositoryName = this.getImageName(container.name);
       let params = {
         force: true,
         repositoryName
