@@ -11,7 +11,7 @@
   "dependencies": {
     "bluebird": "^3.5.4",
     "docker-cli-js": "^2.5.2",
-    "git-rev-sync": "^1.12.0",
+    "git-rev-sync": "^3.0.1",
     "lodash": "^4.17.11"
   },
   "devDependencies": {

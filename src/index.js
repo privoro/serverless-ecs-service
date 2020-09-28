@@ -285,6 +285,7 @@ class ServerlessPlugin {
       this.addResource(resources.Route53AAlias());
     }
     this.addResource(resources.EcsTaskExecutionRole(config.containers));
+    this.addResource(resources.EcsTaskRole(config.containers));
     this.addResource(resources.EcsTaskDefinition(config.containers,tag));
     this.addResource(resources.EcsService(config.containers, tag));
 

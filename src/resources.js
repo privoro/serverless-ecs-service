@@ -24,9 +24,14 @@ module.exports = (serverlessService, config, options) => {
         "kms:Decrypt"
       ],
       "Resource":
-        flattenDeep(containers.map(container => container.secrets.map(secret => secretArn(secret) + '*')))
+        flattenDeep(containers.map(container => (container.secrets || []).map(secret => secretArn(secret) + '*')))
     }
   };
+
+  let hasSecrets= (containers) => {
+    let withSecrets = containers.filter(container => Array.isArray(container.secrets) && container.secrets.length > 0);
+    return withSecrets.length > 0;
+  }
 
   function flattenDeep(arr1) {
     return arr1.reduce((acc, val) => Array.isArray(val) ? acc.concat(flattenDeep(val)) : acc.concat(val), []);
@@ -136,11 +141,16 @@ module.exports = (serverlessService, config, options) => {
           Name: key,
           Value: serverlessService.provider.environment[key]
         }));
+        env = env.concat( Object.keys(container.environment || {}).map(key => ({
+          Name: key,
+          Value: container.environment[key]
+        })));
+
         env.push({
           Name: 'BASE_PATH',
           Value: `/${container.path}`.replace('//','/')
         });
-        let secrets = container.secrets.map(secret => ({
+        let secrets = (container.secrets||[]).map(secret => ({
             Name: secret.name,
             ValueFrom: secretArn(secret)
           }));
@@ -172,6 +182,7 @@ module.exports = (serverlessService, config, options) => {
           Type: 'AWS::ECS::TaskDefinition',
           Properties: {
             ExecutionRoleArn: { Ref: 'ECSTaskExecutionRole' },
+            TaskRoleArn: { Ref: 'ECSTaskRole' },
             Cpu: config.cpu || 1024,
             Memory: config.memory || 2048,
             NetworkMode: 'awsvpc',
@@ -220,7 +231,47 @@ module.exports = (serverlessService, config, options) => {
                     ],
                     Resource: '*'
                   },
-                  SecretsPolicyStatement(containers)
+                  hasSecrets(containers) ? SecretsPolicyStatement(containers) : null
+                ].filter(statement => statement !== null)
+              }
+            }
+          ]
+        }
+      }
+    }),
+
+    EcsTaskRole: (containers) => ({
+      'ECSTaskRole': {
+        Type: 'AWS::IAM::Role',
+        Properties: {
+          AssumeRolePolicyDocument: {
+            Statement: [
+              {
+                Effect: 'Allow',
+                Principal: {
+                  Service: [
+                    'ecs-tasks.amazonaws.com'
+                  ]
+                },
+                Action: [
+                  'sts:AssumeRole'
+                ]
+              }
+            ]
+          },
+          Path: "/",
+          Policies: [
+            {
+              PolicyName: `${slsServiceName}TaskRole`,
+              PolicyDocument: {
+                Statement: [
+                  {
+                    Effect: 'Allow',
+                    Action: [
+                      'sns:Publish',
+                    ],
+                    Resource: '*'
+                  }
                 ]
               }
             }
