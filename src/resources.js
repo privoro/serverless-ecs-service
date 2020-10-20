@@ -169,7 +169,7 @@ module.exports = (serverlessService, config, options) => {
           LogConfiguration: {
             LogDriver: 'awslogs',
             Options: {
-              'awslogs-group': `${slsServiceName}-ecs-service`,
+              'awslogs-group': `${slsServiceName}-ecs-service-${options.stage}`,
               'awslogs-region': options.region,
               'awslogs-stream-prefix': container.name,
             }
