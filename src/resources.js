@@ -42,7 +42,7 @@ module.exports = (serverlessService, config, options) => {
       'LogGroup': {
         Type: 'AWS::Logs::LogGroup',
         Properties: {
-          LogGroupName: `${slsServiceName}-ecs-service`
+          LogGroupName: `${slsServiceName}-ecs-service-${options.stage}`
         }
       }
     }),
@@ -110,7 +110,7 @@ module.exports = (serverlessService, config, options) => {
             }
           },
           SchedulingStrategy: 'REPLICA',
-          ServiceName: `${slsServiceName}-${tag}`,
+          ServiceName: `${slsServiceName}-${options.stage}-${tag}`,
           TaskDefinition: { Ref: 'TaskDefinition' },
           LoadBalancers: containers.filter(container => !! container.path).map(container => ({
             ContainerName: container.name,
@@ -188,7 +188,7 @@ module.exports = (serverlessService, config, options) => {
             NetworkMode: 'awsvpc',
             RequiresCompatibilities: ['FARGATE'],
             ContainerDefinitions: containerDefinitions,
-            Family: `${slsServiceName}-ecs-service`
+            Family: `${slsServiceName}-ecs-service-${options.stage}`
           }
         }
       }
