@@ -31,6 +31,13 @@ class ServerlessPlugin {
         lifecycleEvents: [
           'run-local'
         ],
+      },
+
+      'ecs-build': {
+        usage: 'Build container images',
+        lifecycleEvents: [
+          'build'
+        ],
       }
     };
 
@@ -42,7 +49,8 @@ class ServerlessPlugin {
       'before:package:finalize': this.addCustomResources.bind(this),
       'remove:remove': this.removeService.bind(this),
       'before:ecs-run-local:run-local': this.buildImageByName.bind(this),
-      'ecs-run-local:run-local': this.runImage.bind(this)
+      'ecs-run-local:run-local': this.runImage.bind(this),
+      'ecs-build:build': this.buildAllImages.bind(this)
     };
   }
 
@@ -84,10 +92,10 @@ class ServerlessPlugin {
     return tag;
   }
 
-  getRepoUrl(container) {
+  getRepoUrl(container, latest = false) {
     let config = this.getConfig();
     let name = this.getImageName(container.name);
-    let tag = this.getTag();
+    let tag = latest ? 'latest' : this.getTag();
 
     return `${config.ecr['aws-account-id']}.dkr.ecr.${this.options.region}.amazonaws.com/${name}:${tag}`;
   }
@@ -179,14 +187,15 @@ class ServerlessPlugin {
     let docker = this.getDocker(dockerPath);
     let name = this.getImageName(container.name);
     let repoUrl = this.getRepoUrl(container);
+    let repoUrlLatest = this.getRepoUrl(container,true);
     let dockerFilepath = path.resolve(
         path.resolve(config.contextDir),
         container['docker-dir'] || this.serverless.config.servicePath,
         container['dockerFile'] || 'Dockerfile'
     );
     this.serverless.cli.log(`Building image ${name} ...`);
-    return docker.command(`build --tag ${name}:${tag} --file ${dockerFilepath} .`)
-        .then( (result) => {
+    return docker.command(`build --tag ${name}:${tag} --tag ${name}:latest --file ${dockerFilepath} .`)
+        .then( async (result) => {
           for(let i = result.response.length-3; i < result.response.length; i++) {
             if(result.response[i] === '') { continue; }
             this.serverless.cli.log(result.response[i]);
@@ -194,13 +203,15 @@ class ServerlessPlugin {
 
           this.serverless.cli.log(`Built image ${name}.`);
 
-          return docker.command(`tag ${name}:${tag} ${repoUrl}`)
-              .then(result => {
-                this.serverless.cli.log(`Tagged image for ECR`);
-              });
+          await docker.command(`tag ${name}:${tag} ${repoUrl}`)
+          await docker.command(`tag ${name}:${tag} ${repoUrlLatest}`)
+          this.serverless.cli.log(`Tagged image for ECR`);
+
         }).catch(err => {
           this.serverless.cli.log(`Failed to build image.`);
-          this.serverless.cli.log(err.stdout, err.stderr);
+          this.serverless.cli.log(err.stdout);
+          this.serverless.cli.log(err.stderr);
+          this.serverless.cli.log(err);
         });
   }
 
@@ -221,7 +232,7 @@ class ServerlessPlugin {
     return docker.command(`run ` + runVars.join(" ") + ` ${name}:${tag}`);
   }
 
-  pushImageToEcr() {
+  async pushImageToEcr() {
     // push previously built image to ecr
     let config = this.getConfig();
     if(config === null) {
@@ -236,17 +247,27 @@ class ServerlessPlugin {
       this.serverless.cli.log(`Failed to configure docker with ECR credentials: ${err.message}`);
     }
 
-    return Promise.each(config.containers, container => {
+    return Promise.each(config.containers, async container => {
       let repoUrl = this.getRepoUrl(container);
+      let latestRepoUrl = this.getRepoUrl(container, true);
       let dockerPath = this.getDockerPath();
       let docker = this.getDocker(dockerPath);
-      return docker.command(`push ${repoUrl}`)
-        .then(() => {
-          this.serverless.cli.log(`Successfully pushed ${repoUrl} to ECR.`);
-        }).catch(err => {
-          this.serverless.cli.log(`Failed to push ${repoUrl} to ECR: ${err}.`);
-          this.serverless.cli.log(`You probably need to configure docker with your ecr credentials`);
-        })
+      try {
+        // push :build tag
+        await docker.command(`push ${repoUrl}`)
+        this.serverless.cli.log(`Successfully pushed ${repoUrl} to ECR.`);
+      } catch (err) {
+        this.serverless.cli.log(`Failed to push ${repoUrl} to ECR: ${err}.`);
+        this.serverless.cli.log(`You probably need to configure docker with your ecr credentials`);
+      }
+      try {
+        // push :latest tag
+        await docker.command(`push ${latestRepoUrl}`)
+        this.serverless.cli.log(`Successfully pushed ${latestRepoUrl} to ECR.`);
+      } catch (err) {
+        this.serverless.cli.log(`Failed to push ${latestRepoUrl} to ECR: ${err}.`);
+        this.serverless.cli.log(`You probably need to configure docker with your ecr credentials`);
+      }
     });
   }
 

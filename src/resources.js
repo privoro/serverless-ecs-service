@@ -137,10 +137,15 @@ module.exports = (serverlessService, config, options) => {
       };
 
       let containerDefinitions = containers.map(container => {
-        let env = Object.keys(serverlessService.provider.environment).map(key => ({
-          Name: key,
-          Value: serverlessService.provider.environment[key]
-        }));
+        let env = Object.keys(serverlessService.provider.environment)
+          // exclude env vars overridden in container env config
+          .filter(key => {
+            Object.keys(container.environment || {}).indexOf(key) === -1
+          })
+          .map(key => ({
+            Name: key,
+            Value: serverlessService.provider.environment[key]
+          }));
         env = env.concat( Object.keys(container.environment || {}).map(key => ({
           Name: key,
           Value: container.environment[key]
