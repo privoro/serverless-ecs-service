@@ -194,7 +194,7 @@ class ServerlessPlugin {
         container['dockerFile'] || 'Dockerfile'
     );
     this.serverless.cli.log(`Building image ${name} ...`);
-    return docker.command(`build --tag ${name}:${tag} --tag ${name}:latest --file ${dockerFilepath} .`)
+    return docker.command(`build --no-cache=true --tag ${name}:${tag} --tag ${name}:latest --file ${dockerFilepath} .`)
         .then( async (result) => {
           for(let i = result.response.length-3; i < result.response.length; i++) {
             if(result.response[i] === '') { continue; }

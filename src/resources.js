@@ -163,6 +163,7 @@ module.exports = (serverlessService, config, options) => {
           Essential: true,
           Image: getRepoUrl(container),
           Name: container.name,
+          Cpu: parseInt(Math.floor((config.cpu || 1024)/containers.length)),
           Environment: env,
           Secrets: secrets,
           PortMappings: !container.port ? [] : [
