@@ -176,7 +176,7 @@ module.exports = (serverlessService, config, options) => {
       let env = Object.keys(serverlessService.provider.environment)
         // exclude env vars overridden in container env config
         .filter(key => {
-          Object.keys(container.environment || {}).indexOf(key) === -1
+          return Object.keys(container.environment || {}).indexOf(key) === -1
         })
         .map(key => ({
           Name: key,
