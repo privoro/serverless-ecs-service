@@ -193,8 +193,11 @@ class ServerlessPlugin {
         container['docker-dir'] || this.serverless.config.servicePath,
         container['dockerFile'] || 'Dockerfile'
     );
+
+    let nocache = (config.nocache||"").toLowerCase() === 'true' ? '--no-cache=true':'';
+
     this.serverless.cli.log(`Building image ${name} ...`);
-    return docker.command(`build --no-cache=true --tag ${name}:${tag} --tag ${name}:latest --file ${dockerFilepath} .`)
+    return docker.command(`build ${nocache} --tag ${name}:${tag} --tag ${name}:latest --file ${dockerFilepath} .`)
         .then( async (result) => {
           for(let i = result.response.length-3; i < result.response.length; i++) {
             if(result.response[i] === '') { continue; }
@@ -247,12 +250,15 @@ class ServerlessPlugin {
       this.serverless.cli.log(`Failed to configure docker with ECR credentials: ${err.message}`);
     }
 
+    this.serverless.cli.log(`Will push artifacts to ECR`);
+
     return Promise.each(config.containers, async container => {
       let repoUrl = this.getRepoUrl(container);
       let latestRepoUrl = this.getRepoUrl(container, true);
       let dockerPath = this.getDockerPath();
       let docker = this.getDocker(dockerPath);
       try {
+        this.serverless.cli.log(`Pushing ${repoUrl} to ECR....`);
         // push :build tag
         await docker.command(`push ${repoUrl}`)
         this.serverless.cli.log(`Successfully pushed ${repoUrl} to ECR.`);
@@ -306,9 +312,14 @@ class ServerlessPlugin {
       this.addResource(resources.Route53AAlias());
     }
     this.addResource(resources.EcsTaskExecutionRole(config.containers));
+    // use same task role for all services (for now)
     this.addResource(resources.EcsTaskRole(config.containers));
-    this.addResource(resources.EcsTaskDefinition(config.containers,tag));
-    this.addResource(resources.EcsService(config.containers, tag));
+    (config.containers ||[]).map(container => {
+      this.addResource(resources.EcsTaskDefinition(container,tag));
+      this.addResource(resources.EcsService(container, tag));
+    })
+    // this.addResource(resources.EcsTaskDefinition(config.containers,tag));
+    // this.addResource(resources.EcsService(config.containers, tag));
 
     if(hasIngress) {
       this.addResource(resources.ApiGatewayRestApi());

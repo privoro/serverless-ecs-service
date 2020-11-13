@@ -1,3 +1,8 @@
+const steralize = (value) => {
+  return value.replace(/-/g, '')
+  return value
+}
+
 module.exports = (serverlessService, config, options) => {
   let slsServiceName = serverlessService.service;
 
@@ -89,10 +94,10 @@ module.exports = (serverlessService, config, options) => {
       }
     },
 
-    EcsService: (containers, tag) => ({
-      'ECSService': {
+    EcsService: (container, tag) => ({
+      [`ECSService${steralize(container.name)}`]: {
         Type: 'AWS::ECS::Service',
-        DependsOn: (containers || []).filter(container => !!container.path).map(container => `${container.name}TargetGroup`),
+        DependsOn: ([container] || []).filter(container => !!container.path).map(container => `${container.name}TargetGroup`),
         Properties: {
           Cluster: config.cluster,
           LaunchType: 'FARGATE',
@@ -110,9 +115,9 @@ module.exports = (serverlessService, config, options) => {
             }
           },
           SchedulingStrategy: 'REPLICA',
-          ServiceName: `${slsServiceName}-${options.stage}-${tag}`,
-          TaskDefinition: { Ref: 'TaskDefinition' },
-          LoadBalancers: containers.filter(container => !! container.path).map(container => ({
+          ServiceName: `${options.stage}-${slsServiceName}-${container.name}-${tag}`,
+          TaskDefinition: { Ref: `TaskDefinition${steralize(container.name)}` },
+          LoadBalancers: [container].filter(container => !! container.path).map(container => ({
             ContainerName: container.name,
             ContainerPort: container.port,
             TargetGroupArn: {Ref: `${container.name}TargetGroup`}
@@ -121,7 +126,39 @@ module.exports = (serverlessService, config, options) => {
       },
     }),
 
-    EcsTaskDefinition: (containers, tag) => {
+    // EcsService: (containers, tag) => ({
+    //   'ECSService': {
+    //     Type: 'AWS::ECS::Service',
+    //     DependsOn: (containers || []).filter(container => !!container.path).map(container => `${container.name}TargetGroup`),
+    //     Properties: {
+    //       Cluster: config.cluster,
+    //       LaunchType: 'FARGATE',
+    //       DeploymentConfiguration: {
+    //         MaximumPercent: 200,
+    //         MinimumHealthyPercent: 50
+    //       },
+    //       DesiredCount: config.scale,
+    //       //HealthCheckGracePeriodSeconds: 120,
+    //       NetworkConfiguration: {
+    //         AwsvpcConfiguration: {
+    //           AssignPublicIp: 'ENABLED',
+    //           SecurityGroups: config.vpc['security-groups'] || [],
+    //           Subnets: config.vpc.subnets || []
+    //         }
+    //       },
+    //       SchedulingStrategy: 'REPLICA',
+    //       ServiceName: `${slsServiceName}-${options.stage}-${tag}`,
+    //       TaskDefinition: { Ref: 'TaskDefinition' },
+    //       LoadBalancers: containers.filter(container => !! container.path).map(container => ({
+    //         ContainerName: container.name,
+    //         ContainerPort: container.port,
+    //         TargetGroupArn: {Ref: `${container.name}TargetGroup`}
+    //       }))
+    //     }
+    //   },
+    // }),
+
+    EcsTaskDefinition: (container, tag) => {
       let getImageName = (container) => {
         let parts = [container.name];
         if(config.ecr.namespace) {
@@ -136,55 +173,54 @@ module.exports = (serverlessService, config, options) => {
         return `${config.ecr['aws-account-id']}.dkr.ecr.${options.region}.amazonaws.com/${name}`;
       };
 
-      let containerDefinitions = containers.map(container => {
-        let env = Object.keys(serverlessService.provider.environment)
-          // exclude env vars overridden in container env config
-          .filter(key => {
-            Object.keys(container.environment || {}).indexOf(key) === -1
-          })
-          .map(key => ({
-            Name: key,
-            Value: serverlessService.provider.environment[key]
-          }));
-        env = env.concat( Object.keys(container.environment || {}).map(key => ({
+      let env = Object.keys(serverlessService.provider.environment)
+        // exclude env vars overridden in container env config
+        .filter(key => {
+          Object.keys(container.environment || {}).indexOf(key) === -1
+        })
+        .map(key => ({
           Name: key,
-          Value: container.environment[key]
-        })));
+          Value: serverlessService.provider.environment[key]
+        }));
+      env = env.concat( Object.keys(container.environment || {}).map(key => ({
+        Name: key,
+        Value: container.environment[key]
+      })));
 
-        env.push({
-          Name: 'BASE_PATH',
-          Value: `/${container.path}`.replace('//','/')
-        });
-        let secrets = (container.secrets||[]).map(secret => ({
-            Name: secret.name,
-            ValueFrom: secretArn(secret)
-          }));
-        return {
-          Essential: true,
-          Image: getRepoUrl(container),
-          Name: container.name,
-          Cpu: parseInt(Math.floor((config.cpu || 1024)/containers.length)),
-          Environment: env,
-          Secrets: secrets,
-          PortMappings: !container.port ? [] : [
-            {
-              ContainerPort: container.port
-            }
-          ],
-          ReadonlyRootFilesystem: true,
-          LogConfiguration: {
-            LogDriver: 'awslogs',
-            Options: {
-              'awslogs-group': `${slsServiceName}-ecs-service-${options.stage}`,
-              'awslogs-region': options.region,
-              'awslogs-stream-prefix': container.name,
-            }
+      env.push({
+        Name: 'BASE_PATH',
+        Value: `/${container.path}`.replace('//','/')
+      });
+      let secrets = (container.secrets||[]).map(secret => ({
+        Name: secret.name,
+        ValueFrom: secretArn(secret)
+      }));
+      let containerDefinitions = [{
+        Essential: true,
+        Image: getRepoUrl(container),
+        Name: container.name,
+//        Cpu: parseInt(Math.floor((config.cpu || 1024)),
+        Environment: env,
+        Secrets: secrets,
+        PortMappings: !container.port ? [] : [
+          {
+            ContainerPort: container.port
+          }
+        ],
+        ReadonlyRootFilesystem: true,
+        LogConfiguration: {
+          LogDriver: 'awslogs',
+          Options: {
+            'awslogs-group': `${slsServiceName}-ecs-service-${options.stage}`,
+            'awslogs-region': options.region,
+            'awslogs-stream-prefix': container.name,
           }
         }
-      });
+      }]
+
 
       return {
-        [`TaskDefinition`]: {
+        [`TaskDefinition${steralize(container.name)}`]: {
           Type: 'AWS::ECS::TaskDefinition',
           Properties: {
             ExecutionRoleArn: { Ref: 'ECSTaskExecutionRole' },
@@ -199,6 +235,88 @@ module.exports = (serverlessService, config, options) => {
         }
       }
     },
+
+    // EcsTaskDefinition: (containers, tag) => {
+    //   let getImageName = (container) => {
+    //     let parts = [container.name];
+    //     if(config.ecr.namespace) {
+    //       parts.unshift(config.ecr.namespace);
+    //     }
+    //     return (parts.join('/') + `:${tag}`).toLowerCase();
+    //   };
+    //
+    //   let getRepoUrl = (container) => {
+    //     let name = getImageName(container);
+    //
+    //     return `${config.ecr['aws-account-id']}.dkr.ecr.${options.region}.amazonaws.com/${name}`;
+    //   };
+    //
+    //   let containerDefinitions = containers.map(container => {
+    //     let env = Object.keys(serverlessService.provider.environment)
+    //       // exclude env vars overridden in container env config
+    //       .filter(key => {
+    //         Object.keys(container.environment || {}).indexOf(key) === -1
+    //       })
+    //       .map(key => ({
+    //         Name: key,
+    //         Value: serverlessService.provider.environment[key]
+    //       }));
+    //     env = env.concat( Object.keys(container.environment || {}).map(key => ({
+    //       Name: key,
+    //       Value: container.environment[key]
+    //     })));
+    //
+    //     env.push({
+    //       Name: 'BASE_PATH',
+    //       Value: `/${container.path}`.replace('//','/')
+    //     });
+    //     let secrets = (container.secrets||[]).map(secret => ({
+    //         Name: secret.name,
+    //         ValueFrom: secretArn(secret)
+    //       }));
+    //     return {
+    //       Essential: true,
+    //       Image: getRepoUrl(container),
+    //       Name: container.name,
+    //       Cpu: parseInt(Math.floor((config.cpu || 1024)/containers.length)),
+    //       Environment: env,
+    //       Secrets: secrets,
+    //       PortMappings: !container.port ? [] : [
+    //         {
+    //           ContainerPort: container.port
+    //         }
+    //       ],
+    //       ReadonlyRootFilesystem: true,
+    //       LogConfiguration: {
+    //         LogDriver: 'awslogs',
+    //         Options: {
+    //           'awslogs-group': `${slsServiceName}-ecs-service-${options.stage}`,
+    //           'awslogs-region': options.region,
+    //           'awslogs-stream-prefix': container.name,
+    //         }
+    //       }
+    //     }
+    //   });
+    //
+    //   let resources = {}
+    //
+    //
+    //   return {
+    //     [`TaskDefinition`]: {
+    //       Type: 'AWS::ECS::TaskDefinition',
+    //       Properties: {
+    //         ExecutionRoleArn: { Ref: 'ECSTaskExecutionRole' },
+    //         TaskRoleArn: { Ref: 'ECSTaskRole' },
+    //         Cpu: config.cpu || 1024,
+    //         Memory: config.memory || 2048,
+    //         NetworkMode: 'awsvpc',
+    //         RequiresCompatibilities: ['FARGATE'],
+    //         ContainerDefinitions: containerDefinitions,
+    //         Family: `${slsServiceName}-ecs-service-${options.stage}`
+    //       }
+    //     }
+    //   }
+    // },
 
     EcsTaskExecutionRole: (containers) => ({
       'ECSTaskExecutionRole': {
