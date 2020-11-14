@@ -230,7 +230,7 @@ module.exports = (serverlessService, config, options) => {
             NetworkMode: 'awsvpc',
             RequiresCompatibilities: ['FARGATE'],
             ContainerDefinitions: containerDefinitions,
-            Family: `${slsServiceName}-ecs-service-${options.stage}`
+            Family: `${options.stage}-${container.name}`
           }
         }
       }
