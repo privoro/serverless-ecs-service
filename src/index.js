@@ -307,7 +307,11 @@ class ServerlessPlugin {
 
     let resources = Resources(this.serverless.service, config, this.options);
     // shared resources
-    this.addResource(resources.LogGroup());
+    // log group
+    (config.containers ||[]).map(container => {
+      this.addResource(resources.LogGroup(container));
+    })
+    //this.addResource(resources.LogGroup());
     if(hasIngress) {
       this.addResource(resources.Route53CName());
       this.addResource(resources.Route53AAlias());

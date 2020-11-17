@@ -43,11 +43,11 @@ module.exports = (serverlessService, config, options) => {
   }
 
   return {
-    LogGroup: () => ({
-      'LogGroup': {
+    LogGroup: (container) => ({
+      [`LogGroup${steralize(container.name)}`]: {
         Type: 'AWS::Logs::LogGroup',
         Properties: {
-          LogGroupName: `${slsServiceName}-ecs-service-${options.stage}`
+          LogGroupName: `${container.name}-${options.stage}`
         }
       }
     }),
@@ -211,7 +211,7 @@ module.exports = (serverlessService, config, options) => {
         LogConfiguration: {
           LogDriver: 'awslogs',
           Options: {
-            'awslogs-group': `${slsServiceName}-ecs-service-${options.stage}`,
+            'awslogs-group': {Ref: `LogGroup${steralize(container.name)}`},
             'awslogs-region': options.region,
             'awslogs-stream-prefix': container.name,
           }
