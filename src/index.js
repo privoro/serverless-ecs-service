@@ -274,6 +274,7 @@ class ServerlessPlugin {
       } catch (err) {
         this.serverless.cli.log(`Failed to push ${latestRepoUrl} to ECR: ${err}.`);
         this.serverless.cli.log(`You probably need to configure docker with your ecr credentials`);
+        throw err // dont let serverless keep deploying
       }
     });
   }
