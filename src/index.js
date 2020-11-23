@@ -248,7 +248,16 @@ class ServerlessPlugin {
       execSync(`$(aws ecr get-login --no-include-email --region ${this.options.region})`);
       this.serverless.cli.log(`Successfully configured docker with ECR credentials`);
     } catch (err) {
-      this.serverless.cli.log(`Failed to configure docker with ECR credentials: ${err.message}`);
+      this.serverless.cli.log(`Failed to configure docker with ECR credentials (using aws cli v1): ${err.message}`);
+      // try aws cli v2 version
+      //$(aws ecr get-login --no-include-email --region us-west-2)
+      try {
+        execSync(`$(aws ecr get-login-password --region ${this.options.region})`);
+        this.serverless.cli.log(`Successfully configured docker with ECR credentials`);
+      } catch (err) {
+        this.serverless.cli.log(`Failed to configure docker with ECR credentials (using aws cli v2): ${err.message}`);
+        throw err; // dont let serverless keep deploying
+      }
     }
 
     this.serverless.cli.log(`Will push artifacts to ECR`);
@@ -266,7 +275,9 @@ class ServerlessPlugin {
       } catch (err) {
         this.serverless.cli.log(`Failed to push ${repoUrl} to ECR: ${err}.`);
         this.serverless.cli.log(`You probably need to configure docker with your ecr credentials`);
+        throw err // dont let serverless keep deploying
       }
+
       try {
         // push :latest tag
         await docker.command(`push ${latestRepoUrl}`)
