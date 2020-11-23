@@ -245,14 +245,14 @@ class ServerlessPlugin {
     }
 
     try {
-      execSync(`$(aws ecr get-login --no-include-email --region ${this.options.region} | docker login --username AWS --password-stdin ${config.ecr['aws-account-id']}.dkr.ecr.${this.options.region}.amazonaws.com)`);
+      execSync(`aws ecr get-login --no-include-email --region ${this.options.region} | docker login --username AWS --password-stdin ${config.ecr['aws-account-id']}.dkr.ecr.${this.options.region}.amazonaws.com`);
       this.serverless.cli.log(`Successfully configured docker with ECR credentials`);
     } catch (err) {
       this.serverless.cli.log(`Failed to configure docker with ECR credentials (using aws cli v1): ${err.message}`);
       // try aws cli v2 version
       //$(aws ecr get-login --no-include-email --region us-west-2)
       try {
-        execSync(`$(aws ecr get-login-password --region ${this.options.region} | docker login --username AWS --password-stdin ${config.ecr['aws-account-id']}.dkr.ecr.${this.options.region}.amazonaws.com)`);
+        execSync(`aws ecr get-login-password --region ${this.options.region} | docker login --username AWS --password-stdin ${config.ecr['aws-account-id']}.dkr.ecr.${this.options.region}.amazonaws.com`);
         this.serverless.cli.log(`Successfully configured docker with ECR credentials`);
       } catch (err) {
         this.serverless.cli.log(`Failed to configure docker with ECR credentials (using aws cli v2): ${err.message}`);
