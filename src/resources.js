@@ -105,7 +105,7 @@ module.exports = (serverlessService, config, options) => {
             MaximumPercent: 200,
             MinimumHealthyPercent: 50
           },
-          DesiredCount: config.scale,
+          DesiredCount: container.scale || config.scale,
           //HealthCheckGracePeriodSeconds: 120,
           NetworkConfiguration: {
             AwsvpcConfiguration: {
@@ -125,38 +125,6 @@ module.exports = (serverlessService, config, options) => {
         }
       },
     }),
-
-    // EcsService: (containers, tag) => ({
-    //   'ECSService': {
-    //     Type: 'AWS::ECS::Service',
-    //     DependsOn: (containers || []).filter(container => !!container.path).map(container => `${container.name}TargetGroup`),
-    //     Properties: {
-    //       Cluster: config.cluster,
-    //       LaunchType: 'FARGATE',
-    //       DeploymentConfiguration: {
-    //         MaximumPercent: 200,
-    //         MinimumHealthyPercent: 50
-    //       },
-    //       DesiredCount: config.scale,
-    //       //HealthCheckGracePeriodSeconds: 120,
-    //       NetworkConfiguration: {
-    //         AwsvpcConfiguration: {
-    //           AssignPublicIp: 'ENABLED',
-    //           SecurityGroups: config.vpc['security-groups'] || [],
-    //           Subnets: config.vpc.subnets || []
-    //         }
-    //       },
-    //       SchedulingStrategy: 'REPLICA',
-    //       ServiceName: `${slsServiceName}-${options.stage}-${tag}`,
-    //       TaskDefinition: { Ref: 'TaskDefinition' },
-    //       LoadBalancers: containers.filter(container => !! container.path).map(container => ({
-    //         ContainerName: container.name,
-    //         ContainerPort: container.port,
-    //         TargetGroupArn: {Ref: `${container.name}TargetGroup`}
-    //       }))
-    //     }
-    //   },
-    // }),
 
     EcsTaskDefinition: (container, tag) => {
       let getImageName = (container) => {
