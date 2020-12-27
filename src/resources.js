@@ -7,13 +7,15 @@ module.exports = (serverlessService, config, options) => {
   let slsServiceName = serverlessService.service;
 
   function secretArn(secret) {
+    // { "Fn::Sub": "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:vpc/${vpc}" }
+
     switch(secret.type)  {
       case 'ssm':
-        return `arn:aws:ssm:${options.region}:${config.ecr['aws-account-id']}:parameter/${secret.id}`;
+        return {"Fn::Sub": `arn:\${AWS::Partition}:ssm:${options.region}:${config.ecr['aws-account-id']}:parameter/${secret.id}`}
       case 'kms':
-        return `arn:aws:kms:${options.region}:${config.ecr['aws-account-id']}:key/${secret.id}`;
+        return {"Fn::Sub": `arn:\${AWS::Partition}:kms:${options.region}:${config.ecr['aws-account-id']}:key/${secret.id}`}
       case 'secretsmanager':
-        return `arn:aws:secretsmanager:${options.region}:${config.ecr['aws-account-id']}:secret:${secret.id}`;
+        return {"Fn::Sub": `arn:\${AWS::Partition}:secretsmanager:${options.region}:${config.ecr['aws-account-id']}:secret:${secret.id}`}
       default:
         console.error(`${secret.type} is not a supported type for secret ${secret.name}`);
         return null;
