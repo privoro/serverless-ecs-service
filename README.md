@@ -1,6 +1,40 @@
 # Serverless ECS Service
 Enables you to deploy docker images to (a preconfigured) ECS Cluster. In addition to functions or resources defined in the serverless configuration file.
 
+
+## Commands
+
+### ECS-BUILD 
+This command is used to build and push the docker images to ECR. 
+
+``` 
+serverless ecs-build --stage dev --region us-west-2
+```
+
+### DEPLOY
+This plugin hooks into the `serverless deploy` life cycle to add ECS resources to the cloudformation stack deployed.
+After enabling this plugin for your service you should run `serverless ecs-build` prior to deploy. 
+
+
+``` 
+serverless deploy --stage dev --region us-west-2
+```
+#### TODO
+- [ ] build in a check on deploy hook and trigger build automatically if configured image name is not in ECR
+
+
+### ECS-RESTART
+This command is used to force a new deployment of the ECS services to make sure services are using the latest image in the ECR.
+If your services use `:latest` tags, then `serverless deploy` typically won't result in the new image being used unless you've changed
+environment variables, scale or some other configuration of the task definition. In order to get the services to use the fresh new image, you have to
+force a new deployment.
+
+``` 
+serverless ecs-restart --stage dev --region us-west-2
+```
+
+
+## About
 For containers specified in the plugin config:
  * images will be built and pushed to ECR
  * An ECS Service & TaskDefinition will be created in a pre-configured ECS Cluster

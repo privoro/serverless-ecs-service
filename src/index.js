@@ -34,23 +34,44 @@ class ServerlessPlugin {
       },
 
       'ecs-build': {
-        usage: 'Build container images',
+        usage: 'Build container images and push to repository',
         lifecycleEvents: [
           'build'
         ],
-      }
+      },
+
+      'ecs-restart': {
+        usage: 'restart ecs containers w/ same task definition',
+        lifecycleEvents: [
+          'restart'
+        ]
+      },
+
+      'ecs-test-precheck': {
+        usage: 'test the pre/post check',
+        lifecycleEvents: [
+          'test-precheck'
+        ]
+      },
+
+
     };
 
     this.hooks = {
       'clean-registry:delete': this.removeRepositories.bind(this),
-      'before:package:createDeploymentArtifacts': this.setupEcr.bind(this),
-      'package:createDeploymentArtifacts': this.buildAllImages.bind(this),
-      'after:package:createDeploymentArtifacts': this.pushImageToEcr.bind(this),
       'before:package:finalize': this.addCustomResources.bind(this),
+      'before:deploy:deploy': this.ecsServicePreCheck.bind(this),
+      'deploy:finalize': this.ecsServicePostCheck.bind(this),
       'remove:remove': this.removeService.bind(this),
       'before:ecs-run-local:run-local': this.buildImageByName.bind(this),
       'ecs-run-local:run-local': this.runImage.bind(this),
-      'ecs-build:build': this.buildAllImages.bind(this)
+      'before:ecs-build:build': this.setupEcr.bind(this),
+      'ecs-build:build': this.buildAllImages.bind(this),
+      'after:ecs-build:build': this.pushImageToEcr.bind(this),
+      'ecs-restart:restart': this.restart.bind(this),
+      'before:ecs-test-precheck:test-precheck': this.ecsServicePreCheck.bind(this),
+      'ecs-test-precheck:test-precheck': this.ecsServicePostCheck.bind(this),
+
     };
   }
 
@@ -312,7 +333,6 @@ class ServerlessPlugin {
       return;
     }
 
-    let tag = this.getTag();
     this.serverless.cli.log(`Add custom resources ...`);
 
     let hasIngress = (config.containers || []).filter(c => !!c.path).length > 0;
@@ -332,11 +352,12 @@ class ServerlessPlugin {
     // use same task role for all services (for now)
     this.addResource(resources.EcsTaskRole(config.containers));
     (config.containers ||[]).map(container => {
+      let tag = container.tag || 'latest'; // todo default to latest or use config override (for deploying older versions [aka rollback])
+
+
       this.addResource(resources.EcsTaskDefinition(container,tag));
       this.addResource(resources.EcsService(container, tag));
     })
-    // this.addResource(resources.EcsTaskDefinition(config.containers,tag));
-    // this.addResource(resources.EcsService(config.containers, tag));
 
     if(hasIngress) {
       this.addResource(resources.ApiGatewayRestApi());
@@ -394,6 +415,91 @@ class ServerlessPlugin {
 
   }
 
+  async restart() {
+    this.serverless.cli.log(`Restart ECS containers`);
+    let config = this.getConfig();
+    if(config === null) {
+      this.serverless.cli.log(`serverless-ecs-service config not provided. Skipping restart`);
+      return;
+    }
+
+    let cluster = config.cluster;
+
+    let resources = Resources(this.serverless.service, config, this.options);
+
+    await Promise.each(config.containers, async container => {
+      let serviceName = resources.getServiceName(container)
+      // forces a services new deployment
+      await this.forceDeployment(cluster, serviceName);
+    });
+  }
+
+  async forceDeployment(cluster, serviceName) {
+    try {
+      this.serverless.cli.log(`Forcing a new deployment of ${serviceName} ...`);
+      execSync(`aws ecs update-service --force-new-deployment --service ${serviceName} --cluster ${cluster}`);
+      this.serverless.cli.log(`Successfully forced new deployment of ${serviceName}`);
+    } catch (e) {
+      this.serverless.cli.log(`Error while trying to force a new deployment of ${serviceName}: ${e}`);
+    }
+  }
+
+  // record the current time
+  ecsServicePreCheck(){
+    this._ecsServicePreCheckTime = new Date().getTime()
+    this.serverless.cli.log(`Set precheck timestamp to ${this._ecsServicePreCheckTime}`);
+  }
+
+  // check each service's containers last restart time
+  // if time earlier than recorded time in ecsServicePreCheck
+  // then restart the container.
+  // This allows us to make sure the service is restarted w/ latest image if the definition doesn't change
+  // because we're using latest image tag
+  async ecsServicePostCheck(){
+    // this.serverless.cli.log(`Set precheck timestamp to ${this._ecsServicePreCheckTime}`);
+    // describe each service
+    // if latest deployment created/updated time ! > preCheck time
+    // start a new deployment
+    this.serverless.cli.log(`Check if services need to be restarted`);
+    let config = this.getConfig();
+    if(config === null) {
+      this.serverless.cli.log(`serverless-ecs-service config not provided. Skipping post check`);
+      return;
+    }
+
+    let cluster = config.cluster;
+
+    let resources = Resources(this.serverless.service, config, this.options);
+
+    await Promise.each(config.containers, async container => {
+      let serviceName = resources.getServiceName(container)
+      // forces a services new deployment
+      try {
+        this.serverless.cli.log(`Checking service ${serviceName} ...`);
+        let responseStr = execSync(`aws ecs describe-services --service ${serviceName} --cluster ${cluster}`);
+
+        let response = JSON.parse(responseStr);
+
+        await Promise.each(response.services, async service => {
+          let deployment = service.deployments.filter(deployment => deployment.status === 'PRIMARY').pop()
+          if(! deployment) {
+            this.serverless.cli.log(`Couldn't find primary deployment for ${serviceName}`)
+            return
+          }
+          let ts = new Date(deployment.updatedAt || deployment.createdAt).getTime();
+          if(ts > this._ecsServicePreCheckTime) {
+            this.serverless.cli.log(`Service ${serviceName} already has a fresh deployment @ ${new Date(this._ecsServicePreCheckTime).toISOString()}`)
+            return
+          }
+          // force a new deployment
+          await this.forceDeployment(cluster, serviceName);
+        });
+
+      } catch (e) {
+        this.serverless.cli.log(`Error while trying to describe ${serviceName}: ${e}`);
+      }
+    });
+  }
 }
 
 module.exports = ServerlessPlugin;

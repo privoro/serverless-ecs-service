@@ -44,7 +44,12 @@ module.exports = (serverlessService, config, options) => {
     return arr1.reduce((acc, val) => Array.isArray(val) ? acc.concat(flattenDeep(val)) : acc.concat(val), []);
   }
 
+  function getServiceName(container) {
+    return `${options.stage}-${slsServiceName}-${container.name}`
+  }
+
   return {
+    getServiceName,
     LogGroup: (container) => ({
       [`LogGroup${steralize(container.name)}`]: {
         Type: 'AWS::Logs::LogGroup',
@@ -117,7 +122,7 @@ module.exports = (serverlessService, config, options) => {
             }
           },
           SchedulingStrategy: 'REPLICA',
-          ServiceName: `${options.stage}-${slsServiceName}-${container.name}-${tag}`,
+          ServiceName: getServiceName(container),
           TaskDefinition: { Ref: `TaskDefinition${steralize(container.name)}` },
           LoadBalancers: [container].filter(container => !! container.path).map(container => ({
             ContainerName: container.name,
