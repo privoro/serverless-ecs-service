@@ -59,13 +59,13 @@ class ServerlessPlugin {
 
     this.hooks = {
       'clean-registry:delete': this.removeRepositories.bind(this),
-      'before:package:createDeploymentArtifacts': this.setupEcr.bind(this),
       'before:package:finalize': this.addCustomResources.bind(this),
       'before:deploy:deploy': this.ecsServicePreCheck.bind(this),
       'deploy:finalize': this.ecsServicePostCheck.bind(this),
       'remove:remove': this.removeService.bind(this),
       'before:ecs-run-local:run-local': this.buildImageByName.bind(this),
       'ecs-run-local:run-local': this.runImage.bind(this),
+      'before:ecs-build:build': this.setupEcr.bind(this),
       'ecs-build:build': this.buildAllImages.bind(this),
       'after:ecs-build:build': this.pushImageToEcr.bind(this),
       'ecs-restart:restart': this.restart.bind(this),
