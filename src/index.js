@@ -218,6 +218,7 @@ class ServerlessPlugin {
     let nocache = (config.nocache||"").toLowerCase() === 'true' ? '--no-cache=true':'';
 
     this.serverless.cli.log(`Building image ${name} ...`);
+    this.serverless.cli.log(`docker build --tag ${name}:${tag} --tag ${name}:latest --file ${dockerFilepath} .`);
     // --no-cache=true
     return docker.command(`build --tag ${name}:${tag} --tag ${name}:latest --file ${dockerFilepath} .`)
         .then( async (result) => {
